@@ -1,0 +1,54 @@
+# Flutter
+user/.dart_tool/
+user/.packages
+user/.pub/
+user/build/
+user/.flutter-plugins
+user/.flutter-plugins-dependencies
+user/.idea/
+user/*.iml
+user/.metadata
+
+# Android
+user/android/.gradle/
+user/android/app/debug/
+user/android/app/profile/
+user/android/app/release/
+user/android/local.properties
+user/android/key.properties
+*.jks
+*.keystore
+
+# iOS
+user/ios/Pods/
+user/ios/.symlinks/
+user/ios/Flutter/Flutter.framework
+user/ios/Flutter/Flutter.podspec
+
+# Build outputs
+*.apk
+*.aab
+*.dSYM.zip
+*.dSYM
+*.exe
+*.AppImage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Colab
+colab/.ipynb_checkpoints/
+colab/__pycache__/
+colab/*.pyc
+
+# Agent artifacts
+.gemini/
+.agent/
