@@ -4,7 +4,6 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
 import '../constants/app_constants.dart';
 
 /// Represents a single recorded voice sample
@@ -25,7 +24,6 @@ class AudioRecordingService {
   static final AudioRecordingService instance = AudioRecordingService._();
 
   final AudioRecorder _recorder = AudioRecorder();
-  final Uuid _uuid = const Uuid();
 
   SupabaseClient get _client => Supabase.instance.client;
   String? get _userId => _client.auth.currentUser?.id;

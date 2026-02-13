@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/services/training_service.dart';
+import 'training_status_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,11 +16,14 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String _userName = 'User';
   String _userEmail = '';
+  TrainingStatus _trainingStatus = TrainingStatus.notStarted;
+  int _trainingProgress = 0;
 
   @override
   void initState() {
     super.initState();
     _loadUserProfile();
+    _loadTrainingStatus();
   }
 
   Future<void> _loadUserProfile() async {
@@ -42,6 +47,16 @@ class _HomePageState extends State<HomePage> {
         }
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadTrainingStatus() async {
+    final status = await TrainingService.instance.getCurrentStatus();
+    if (mounted && status != null) {
+      setState(() {
+        _trainingStatus = status.status;
+        _trainingProgress = status.progressPercentage;
+      });
+    }
   }
 
   @override
@@ -192,6 +207,12 @@ class _HomePageState extends State<HomePage> {
 
             const SizedBox(height: 24),
 
+            _buildSectionHeader('Model Training'),
+            const SizedBox(height: 12),
+            _buildTrainingCard(),
+
+            const SizedBox(height: 24),
+
             _buildSectionHeader('Subscription'),
             const SizedBox(height: 12),
 
@@ -224,6 +245,97 @@ class _HomePageState extends State<HomePage> {
             ),
 
             const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrainingCard() {
+    final Color statusColor;
+    final String statusText;
+    final IconData statusIcon;
+
+    switch (_trainingStatus) {
+      case TrainingStatus.notStarted:
+        statusColor = AppColors.textSecondary;
+        statusText = 'Not trained yet';
+        statusIcon = Icons.hourglass_empty_rounded;
+        break;
+      case TrainingStatus.downloadingAudio:
+      case TrainingStatus.training:
+      case TrainingStatus.uploadingModel:
+        statusColor = AppColors.accentNavy;
+        statusText = _trainingStatus.displayText;
+        statusIcon = Icons.model_training_rounded;
+        break;
+      case TrainingStatus.completed:
+        statusColor = AppColors.success;
+        statusText = 'Model Ready';
+        statusIcon = Icons.check_circle_rounded;
+        break;
+      case TrainingStatus.failed:
+        statusColor = AppColors.error;
+        statusText = 'Training Failed';
+        statusIcon = Icons.error_rounded;
+        break;
+    }
+
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const TrainingStatusPage()),
+        );
+        _loadTrainingStatus();
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(statusIcon, color: statusColor, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Voice Model',
+                    style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(statusText, style: AppTypography.bodySmall(color: statusColor)),
+                  if (_trainingStatus.isInProgress) ...[
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: _trainingProgress / 100,
+                        backgroundColor: AppColors.divider,
+                        color: AppColors.primaryNavy,
+                        minHeight: 4,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 20),
           ],
         ),
       ),
