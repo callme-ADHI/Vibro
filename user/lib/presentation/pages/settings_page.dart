@@ -1,12 +1,135 @@
-// VIBRO Settings Page — User preferences
+// VIBRO Settings Page — User preferences + username edit
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
 import 'login_page.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  String _username = '';
+  String _email = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    final profile = await AuthService.instance.getUserProfile();
+
+    if (mounted) {
+      setState(() {
+        _email = user?.email ?? '';
+        _username = profile?['username'] ?? '';
+      });
+    }
+  }
+
+  Future<void> _editUsername() async {
+    final controller = TextEditingController(text: _username);
+    String? errorText;
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Text(
+            'Edit Username',
+            style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
+          ),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 30,
+            style: AppTypography.bodyLarge(color: AppColors.textPrimary),
+            onChanged: (v) {
+              if (errorText != null) {
+                setDialogState(() => errorText = null);
+              }
+            },
+            decoration: InputDecoration(
+              hintText: 'Enter your name',
+              hintStyle: AppTypography.bodyMedium(color: AppColors.textSecondary),
+              errorText: errorText,
+              counterText: '',
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.divider),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.divider),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.accentNavy, width: 1.5),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('Cancel', style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () {
+                final trimmed = controller.text.trim();
+                if (trimmed.isEmpty) {
+                  setDialogState(() => errorText = 'Username cannot be empty');
+                  return;
+                }
+                Navigator.of(ctx).pop(trimmed);
+              },
+              child: Text(
+                'Save',
+                style: AppTypography.bodyMedium(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (newName != null && newName != _username) {
+      try {
+        await AuthService.instance.updateUsername(newName);
+        setState(() => _username = newName);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Username updated to "$newName"'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update: ${e.toString().replaceFirst("Exception: ", "")}'),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
+    controller.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +154,62 @@ class SettingsPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Profile Card
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.divider),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.badgeBackground,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _username.isNotEmpty ? _username[0].toUpperCase() : '?',
+                        style: AppTypography.sectionTitle(color: AppColors.primaryNavy).copyWith(fontSize: 20),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _username.isNotEmpty ? _username : 'No username set',
+                          style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _email,
+                          style: AppTypography.bodySmall(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _editUsername,
+                    icon: const Icon(Icons.edit_outlined, color: AppColors.accentNavy, size: 20),
+                    splashRadius: 20,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
             // Device Section
             _buildSectionHeader('Device'),
             const SizedBox(height: 12),
@@ -84,11 +263,6 @@ class SettingsPage extends StatelessWidget {
             _buildSectionHeader('Account'),
             const SizedBox(height: 12),
             _buildSettingsCard([
-              _buildSettingsTile(
-                icon: Icons.person_outline_rounded,
-                title: 'Profile',
-                subtitle: 'Manage account details',
-              ),
               _buildSettingsTile(
                 icon: Icons.workspace_premium_rounded,
                 title: 'Subscription',

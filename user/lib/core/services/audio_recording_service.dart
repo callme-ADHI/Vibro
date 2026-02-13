@@ -1,4 +1,4 @@
-// VIBRO Audio Recording Service — Record, cache, and upload voice samples
+// VIBRO Audio Recording Service — Record, playback, cache, and upload voice samples
 import 'dart:io';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
@@ -6,6 +6,19 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../constants/app_constants.dart';
+
+/// Represents a single recorded voice sample
+class VoiceSample {
+  final int index;
+  final String filePath;
+  final DateTime recordedAt;
+
+  VoiceSample({
+    required this.index,
+    required this.filePath,
+    required this.recordedAt,
+  });
+}
 
 class AudioRecordingService {
   AudioRecordingService._();
@@ -45,7 +58,6 @@ class AudioRecordingService {
   }
 
   /// Start recording a voice sample
-  /// Returns the file path where the recording will be saved
   Future<String> startRecording(int sampleIndex) async {
     if (_isRecording) throw Exception('Already recording');
 
@@ -74,7 +86,6 @@ class AudioRecordingService {
   }
 
   /// Stop recording
-  /// Returns the file path of the recorded sample
   Future<String?> stopRecording() async {
     if (!_isRecording) return null;
 
@@ -83,22 +94,37 @@ class AudioRecordingService {
     return path;
   }
 
+  /// Delete a specific sample file
+  Future<void> deleteSampleFile(String filePath) async {
+    final file = File(filePath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  /// Get file size in KB
+  Future<double> getFileSizeKB(String filePath) async {
+    final file = File(filePath);
+    if (await file.exists()) {
+      final bytes = await file.length();
+      return bytes / 1024;
+    }
+    return 0;
+  }
+
   /// Upload all recorded samples to Supabase Storage
-  /// Returns the storage base path for the submission
   Future<String> uploadSamples({
     required String nameId,
-    required int sampleCount,
+    required List<VoiceSample> samples,
   }) async {
     if (_userId == null) throw Exception('Not authenticated');
+    if (samples.length < 10) throw Exception('Minimum 10 samples required');
 
-    final tempDir = await _getTempDir();
     final storagePath = '$_userId/$nameId';
-    final submissionId = _uuid.v4();
 
     // Upload each sample
-    for (int i = 0; i < sampleCount; i++) {
-      final localPath = '$tempDir/sample_$i.wav';
-      final file = File(localPath);
+    for (int i = 0; i < samples.length; i++) {
+      final file = File(samples[i].filePath);
 
       if (!await file.exists()) {
         throw Exception('Sample ${i + 1} not found');
@@ -126,10 +152,9 @@ class AudioRecordingService {
 
     // Create audio_submissions record
     await _client.from('audio_submissions').insert({
-      'id': submissionId,
       'user_id': _userId!,
       'trained_name_id': nameId,
-      'clip_count': sampleCount,
+      'clip_count': samples.length,
       'status': 'uploaded',
       'storage_path': storagePath,
     });
