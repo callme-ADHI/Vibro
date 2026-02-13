@@ -28,10 +28,9 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # ═══════════════════════════════════════════════════
 # CONFIG (service role key — keep private)
 # ═══════════════════════════════════════════════════
-# Set SUPABASE_SERVICE_KEY in Colab: Runtime → Secrets, or env vars
-# Or run: SUPABASE_SERVICE_KEY = "your_key" before running
+# Set SUPABASE_SERVICE_KEY in Colab: Runtime → Secrets, or env vars (takes precedence)
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "YOUR_SERVICE_KEY_HERE")
 
 if not SUPABASE_SERVICE_KEY:
     raise ValueError("Set SUPABASE_SERVICE_KEY env or in Colab secrets. Do not commit real keys.")
@@ -106,8 +105,9 @@ def load_audio(file_path):
     """Load a WAV file and return raw audio array."""
     try:
         audio, _ = librosa.load(file_path, sr=SAMPLE_RATE)
-        # Trim silence (optional, but good for mean features)
-        audio, _ = librosa.effects.trim(audio)
+        # Trim silence ONLY if it's not a background noise file
+        if "_background_noise_" not in file_path:
+            audio, _ = librosa.effects.trim(audio)
         return audio
     except Exception as e:
         print(f"      ⚠️ {os.path.basename(file_path)}: {e}")

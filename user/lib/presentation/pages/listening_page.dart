@@ -7,9 +7,12 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:vibration/vibration.dart';
 import '../../core/services/recognition_service.dart';
 import '../../core/services/name_service.dart';
+import '../../core/services/location_service.dart';
+import '../../core/services/history_service.dart';
 import '../../core/services/kws_service.dart'; // DetectionEvent
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
+import 'locations_page.dart';
 
 class ListeningPage extends StatefulWidget {
   const ListeningPage({super.key});
@@ -22,6 +25,7 @@ class _ListeningPageState extends State<ListeningPage>
     with SingleTickerProviderStateMixin {
   final RecognitionService _recognition = RecognitionService.instance;
   final NameService _nameService = NameService.instance;
+  final LocationService _locationService = LocationService.instance;
   bool _isListening = false;
   bool _isReady = false;
   bool _isLoading = true;
@@ -29,6 +33,10 @@ class _ListeningPageState extends State<ListeningPage>
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
   final Set<String> _selectedNames = {};
+
+  List<Map<String, dynamic>> _locations = [];
+  String? _selectedLocationId;
+  static const String _allNamesId = '__all__';
 
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
@@ -53,14 +61,22 @@ class _ListeningPageState extends State<ListeningPage>
   Future<void> _loadNamesAndInit() async {
     setState(() => _isLoading = true);
     try {
-      final namesData = await _nameService.getNames();
-      final names = namesData
-          .map((n) => (n['name_label'] as String?) ?? '')
-          .where((s) => s.isNotEmpty)
-          .toList();
+      final locations = await _locationService.getLocations();
+      List<String> names;
+      if (_selectedLocationId == null || _selectedLocationId == _allNamesId) {
+        final namesData = await _nameService.getNames();
+        names = namesData
+            .map((n) => (n['name_label'] as String?) ?? '')
+            .where((s) => s.isNotEmpty)
+            .toList();
+      } else {
+        names = await _locationService.getNameLabelsForLocation(_selectedLocationId!);
+      }
       if (mounted) {
         setState(() {
+          _locations = locations;
           _availableNames = names;
+          _selectedNames.clear();
           _selectedNames.addAll(names);
           _isReady = names.isNotEmpty;
           _isLoading = false;
@@ -69,12 +85,20 @@ class _ListeningPageState extends State<ListeningPage>
     } catch (e) {
       if (mounted) {
         setState(() {
+          _locations = [];
           _availableNames = [];
+          _selectedNames.clear();
           _isReady = false;
           _isLoading = false;
         });
       }
     }
+  }
+
+  Future<void> _onLocationChanged(String? locationId) async {
+    if (_selectedLocationId == locationId) return;
+    setState(() => _selectedLocationId = locationId);
+    await _loadNamesAndInit();
   }
 
   Future<void> _initNotifications() async {
@@ -121,6 +145,12 @@ class _ListeningPageState extends State<ListeningPage>
       // Feedback when name is selected (speech_to_text uses 60% threshold)
       if (_selectedNames.contains(event.name)) {
         _triggerFeedback(event);
+        // Save to history (location is null if "All names")
+        HistoryService.instance.insertDetection(
+          nameLabel: event.name,
+          confidence: event.confidence,
+          locationId: _selectedLocationId == _allNamesId ? null : _selectedLocationId,
+        );
       }
     });
 
@@ -248,7 +278,10 @@ class _ListeningPageState extends State<ListeningPage>
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: _buildModelCard(),
           ),
-          
+
+          // ── Location Selector ──
+          _buildLocationSelector(),
+
           // ── Name Selection Chips ──
           if (_isReady && _availableNames.isNotEmpty)
              _buildNameSelection(),
@@ -285,6 +318,82 @@ class _ListeningPageState extends State<ListeningPage>
             child: _detections.isEmpty
                 ? _buildEmptyLog()
                 : _buildDetectionList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  LOCATION SELECTOR
+  // ═══════════════════════════════════════════
+
+  Widget _buildLocationSelector() {
+    final options = <String, String>{_allNamesId: 'All names'};
+    for (final loc in _locations) {
+      options[loc['id'] as String] = loc['location_name'] as String? ?? '';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Location',
+                style: AppTypography.bodySmall(color: AppColors.textSecondary),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LocationsPage()),
+                  );
+                  _loadNamesAndInit();
+                },
+                icon: const Icon(Icons.settings_rounded, size: 16),
+                label: const Text('Manage'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.accentNavy,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ...options.entries.map((e) {
+                  final isSelected = _selectedLocationId == e.key ||
+                      (_selectedLocationId == null && e.key == _allNamesId);
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(e.value),
+                      selected: isSelected,
+                      onSelected: (_) => _onLocationChanged(e.key),
+                      backgroundColor: AppColors.white,
+                      selectedColor: AppColors.primaryNavy.withValues(alpha: 0.2),
+                      checkmarkColor: AppColors.primaryNavy,
+                      labelStyle: AppTypography.bodySmall(
+                        color: isSelected ? AppColors.primaryNavy : AppColors.textPrimary,
+                      ).copyWith(fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(
+                          color: isSelected ? AppColors.primaryNavy : AppColors.divider,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
           ),
         ],
       ),

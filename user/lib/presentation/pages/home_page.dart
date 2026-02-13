@@ -4,7 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
+import '../../core/services/location_service.dart';
 import 'training_status_page.dart';
+import 'locations_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,12 +21,14 @@ class _HomePageState extends State<HomePage> {
   TrainingStatus _trainingStatus = TrainingStatus.notStarted;
   int _trainingProgress = 0;
   int _modelCount = 0;
+  int _locationCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadUserProfile();
     _loadTrainingStatus();
+    _loadLocationCount();
   }
 
   Future<void> _loadUserProfile() async {
@@ -71,6 +75,13 @@ class _HomePageState extends State<HomePage> {
           setState(() => _modelCount = (models as List).length);
         }
       }
+    } catch (_) {}
+  }
+
+  Future<void> _loadLocationCount() async {
+    try {
+      final locs = await LocationService.instance.getLocations();
+      if (mounted) setState(() => _locationCount = locs.length);
     } catch (_) {}
   }
 
@@ -188,11 +199,19 @@ class _HomePageState extends State<HomePage> {
                   subtitle: 'No activity',
                   statusColor: AppColors.textSecondary,
                 ),
-                _buildFeatureCard(
-                  icon: Icons.location_on_rounded,
-                  title: 'Locations',
-                  subtitle: '0 configured',
-                  statusColor: AppColors.success,
+                GestureDetector(
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const LocationsPage()),
+                    );
+                    _loadLocationCount();
+                  },
+                  child: _buildFeatureCard(
+                    icon: Icons.location_on_rounded,
+                    title: 'Locations',
+                    subtitle: '$_locationCount configured',
+                    statusColor: _locationCount > 0 ? AppColors.success : AppColors.accentNavy,
+                  ),
                 ),
                 _buildFeatureCard(
                   icon: Icons.developer_board_rounded,

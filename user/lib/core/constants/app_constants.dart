@@ -29,6 +29,9 @@ class AppConstants {
   static const int basicMaxModels = 10;
   static const int basicMaxLocations = 15;
 
+  // Locations (user configurable)
+  static const int maxLocations = 3;
+
   // Subscription Limits (Premium Tier)
   static const int premiumMaxModels = 50;
   static const int premiumMaxLocations = 100;

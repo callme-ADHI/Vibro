@@ -4,7 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/location_service.dart';
 import 'login_page.dart';
+import 'locations_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -16,11 +18,20 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _username = '';
   String _email = '';
+  int _locationCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadLocationCount();
+  }
+
+  Future<void> _loadLocationCount() async {
+    try {
+      final locs = await LocationService.instance.getLocations();
+      if (mounted) setState(() => _locationCount = locs.length);
+    } catch (_) {}
   }
 
   Future<void> _loadProfile() async {
@@ -243,7 +254,13 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildSettingsTile(
                 icon: Icons.location_on_rounded,
                 title: 'Location Mapping',
-                subtitle: '0 locations configured',
+                subtitle: '$_locationCount locations configured',
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LocationsPage()),
+                  );
+                  _loadLocationCount();
+                },
               ),
               _buildSettingsTile(
                 icon: Icons.tune_rounded,
@@ -357,8 +374,9 @@ class _SettingsPageState extends State<SettingsPage> {
     required String title,
     required String subtitle,
     Widget? trailing,
+    VoidCallback? onTap,
   }) {
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
@@ -391,5 +409,13 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: content,
+      );
+    }
+    return content;
   }
 }
