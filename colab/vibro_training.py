@@ -33,8 +33,8 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # Credentials Input (User must provide at runtime)
 # IMPORTANT: DO NOT COMMIT REAL KEYS TO GIT
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
-# SUPABASE_SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"
+# SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
+SUPABASE_SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"
 
 if SUPABASE_SERVICE_KEY.startswith("sb_publishable"):
     print("\n⚠️ WARNING: You have entered a PUBLIC ANON KEY (sb_publishable...).")
@@ -243,20 +243,13 @@ def train_user(user_id, trained_names):
 
         update_status(user_id, "DOWNLOADING_AUDIO", 30)
 
-        # ── Generate Background Noise Class (DISABLED BY USER) ──
-        # noise_dir = os.path.join(DATASET_DIR, "_background_noise_")
-        # generate_noise_samples(noise_dir, count=60)
+        # ── Generate Background Noise Class ──
+        noise_dir = os.path.join(DATASET_DIR, "_background_noise_")
+        generate_noise_samples(noise_dir, count=60)
         
         # Add to trained names list for processing
-        # processing_names = trained_names + [{"id": "noise", "name_label": "_background_noise_"}]
-        # processing_names = trained_names # User requested REMOVAL of background noise
+        processing_names = trained_names + [{"id": "noise", "name_label": "_background_noise_"}]
         
-        # We MUST have at least 2 classes for classification.
-        # If user provides only 1 name, we effectively create a "NOT_{name}" dummy class?
-        # Or we just let sklearn handle it (it might fail or default to 1 class).
-        # Let's try just trained_names.
-        processing_names = trained_names
-
         # ── Feature extraction + augmentation ──
         features, labels = [], []
         for entry in processing_names:
