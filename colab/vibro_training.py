@@ -243,12 +243,19 @@ def train_user(user_id, trained_names):
 
         update_status(user_id, "DOWNLOADING_AUDIO", 30)
 
-        # ── Generate Background Noise Class ──
-        noise_dir = os.path.join(DATASET_DIR, "_background_noise_")
-        generate_noise_samples(noise_dir, count=60)
+        # ── Generate Background Noise Class (DISABLED BY USER) ──
+        # noise_dir = os.path.join(DATASET_DIR, "_background_noise_")
+        # generate_noise_samples(noise_dir, count=60)
         
         # Add to trained names list for processing
-        processing_names = trained_names + [{"id": "noise", "name_label": "_background_noise_"}]
+        # processing_names = trained_names + [{"id": "noise", "name_label": "_background_noise_"}]
+        # processing_names = trained_names # User requested REMOVAL of background noise
+        
+        # We MUST have at least 2 classes for classification.
+        # If user provides only 1 name, we effectively create a "NOT_{name}" dummy class?
+        # Or we just let sklearn handle it (it might fail or default to 1 class).
+        # Let's try just trained_names.
+        processing_names = trained_names
 
         # ── Feature extraction + augmentation ──
         features, labels = [], []

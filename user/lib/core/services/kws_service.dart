@@ -332,7 +332,7 @@ class KwsService {
 
     if (maxConf >= AppConstants.defaultConfidenceThreshold) {
       final name = _labels[maxIdx] ?? 'Unknown';
-      if (name == '_background_noise_') return;
+      // if (name == '_background_noise_') return; // DISABLED BY USER
 
       final now = DateTime.now();
 
