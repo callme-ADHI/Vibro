@@ -33,7 +33,13 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # Credentials Input (User must provide at runtime)
 # IMPORTANT: DO NOT COMMIT REAL KEYS TO GIT
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key: ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
+SUPABASE_SERVICE_KEY = input("Enter Supabase SERVICE ROLE Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
+
+if SUPABASE_SERVICE_KEY.startswith("sb_publishable"):
+    print("\n⚠️ WARNING: You entered a 'sb_publishable' (Anon) key!")
+    print("   This key handles RLS (Row Level Security) and likely HIDES other users' data.")
+    print("   The script will probably find 0 records.")
+    print("   👉 Please use the SERVICE ROLE KEY (starts with 'sb_service_role') from Supabase > Settings > API.\n")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
