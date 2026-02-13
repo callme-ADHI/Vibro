@@ -33,13 +33,13 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # Credentials Input (User must provide at runtime)
 # IMPORTANT: DO NOT COMMIT REAL KEYS TO GIT
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-SUPABASE_SERVICE_KEY = input("Enter Supabase SERVICE ROLE Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
+SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
 
 if SUPABASE_SERVICE_KEY.startswith("sb_publishable"):
-    print("\n⚠️ WARNING: You entered a 'sb_publishable' (Anon) key!")
-    print("   This key handles RLS (Row Level Security) and likely HIDES other users' data.")
-    print("   The script will probably find 0 records.")
-    print("   👉 Please use the SERVICE ROLE KEY (starts with 'sb_service_role') from Supabase > Settings > API.\n")
+    print("\n⚠️ WARNING: You have entered a PUBLIC ANON KEY (sb_publishable...).")
+    print("   This script requires the SERVICE ROLE SECRET (starts with sb_service_role...) to see all user data.")
+    print("   Please go to Supabase Dashboard -> Settings -> API -> service_role secret.")
+    print("   Without it, no records will be found due to Row Level Security (RLS).\n")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
@@ -419,15 +419,29 @@ def train_user(user_id, trained_names):
 
 # 🚀 AUTO-DISCOVER & TRAIN ALL PENDING USERS
 print(f"\n{'='*50}")
-print("� SCANNING FOR USERS (FORCE MODE ENABLED)")
+print(" SCANNING FOR USERS (FORCE MODE ENABLED)")
 print(f"{'='*50}")
 
 try:
+    # 0. Debug Check: Verify if we can see ANY data
+    try:
+        debug_check = supabase.table("audio_submissions").select("id", count="exact").limit(1).execute()
+        print(f"DEBUG: Total rows visible in 'audio_submissions': {debug_check.count}")
+        
+        if debug_check.count == 0:
+            print("\n⚠️ WARNING: 0 records found!")
+            print("   Possible causes:")
+            print("   1. You are using an ANON KEY. Use the SERVICE ROLE KEY to bypass RLS.")
+            print("   2. No audio has been uploaded yet.")
+            print("   3. You are connected to the wrong Supabase project.\n")
+    except Exception as e:
+        print(f"DEBUG: Failed to count rows: {e}")
+
     # 1. Get ALL users who have ever uploaded audio (ignore status)
     submissions = supabase.table("audio_submissions").select("user_id").execute()
     all_users = list(set(s["user_id"] for s in submissions.data))
     
-    print(f"� Found {len(all_users)} unique users with audio.")
+    print(f"👉 Found {len(all_users)} unique users with audio.")
 
     users_to_train = []
 
