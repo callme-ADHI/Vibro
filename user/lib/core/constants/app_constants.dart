@@ -12,6 +12,10 @@ class AppConstants {
   static const double defaultConfidenceThreshold = 0.40;
   static const double maxConfidenceThreshold = 0.80;
 
+  // Speech Recognition (blablabala-style)
+  static const double speechRecognitionConfidenceThreshold = 0.60; // 60% min
+  static const int detectionCooldownSeconds = 5;
+
   // Audio Recording
   static const int minAudioClips = 10;
   static const int maxAudioClipDuration = 300; // 5 minutes in seconds

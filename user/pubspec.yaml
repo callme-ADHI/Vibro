@@ -35,6 +35,9 @@ dependencies:
   # ML Inference
   tflite_flutter: ^0.12.1
 
+  # Speech Recognition (blablabala-style detection)
+  speech_to_text: ^7.3.0
+
   # Notifications & Feedback
   flutter_local_notifications: ^18.0.1
   vibration: ^2.0.1

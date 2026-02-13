@@ -115,6 +115,35 @@ class MfccExtractor {
     return result;
   }
 
+  /// Trim leading and trailing silence to match librosa.effects.trim behavior.
+  /// Training uses trim on every sample; inference must do the same.
+  /// topDb: threshold in dB below peak to consider as silence (default 60, matches librosa).
+  static List<double> trimSilence(List<double> audio, {double topDb = 60}) {
+    if (audio.isEmpty) return audio;
+    double ref = 0.0;
+    for (int i = 0; i < audio.length; i++) {
+      final a = audio[i].abs();
+      if (a > ref) ref = a;
+    }
+    if (ref < 1e-10) return audio;
+    final threshold = ref * pow(10.0, -topDb / 20.0);
+    int first = 0;
+    for (; first < audio.length && audio[first].abs() <= threshold; first++) {}
+    int last = audio.length - 1;
+    for (; last >= first && audio[last].abs() <= threshold; last--) {}
+    final len = last - first + 1;
+    if (len < 512) return audio;
+    return audio.sublist(first, last + 1);
+  }
+
+  /// Compute actual frame count for given audio length (for correct mean).
+  static int actualFrameCount(int audioLength, int nFft, int hopLength, int maxPadLen) {
+    final pad = nFft ~/ 2;
+    final paddedLen = audioLength + 2 * pad;
+    final n = ((paddedLen - nFft) ~/ hopLength) + 1;
+    return min(max(1, n), maxPadLen);
+  }
+
   /// Convert raw PCM bytes (16-bit LE signed) to normalised doubles.
   static List<double> pcmBytesToDoubles(Uint8List bytes) {
     final bd = ByteData.sublistView(bytes);

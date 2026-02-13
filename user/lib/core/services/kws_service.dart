@@ -263,35 +263,38 @@ class KwsService {
 
     // Take the latest 2s (or whatever we have)
     final windowSize = min(_audioBuffer.length, _bufferSamples);
-    final window =
+    List<double> window =
         _audioBuffer.sublist(_audioBuffer.length - windowSize);
-    
-    // DEBUG: Only print occasionally to avoid spam, or check size
-    if (_audioBuffer.length < _bufferSamples) {
-       print('DEBUG: KWS - Buffering... ${_audioBuffer.length}/$_bufferSamples');
-    }
+
+    // CRITICAL: Trim silence to match training! Python uses librosa.effects.trim
+    // on every sample. Raw mic is mostly silence → mean MFCC looks like
+    // _background_noise_. Trim focuses on the speech segment.
+    window = MfccExtractor.trimSilence(window, topDb: 60);
 
     // Extract MFCC → 13 x 64 (flattened)
-    final features = _mfcc.extract(window); // [13 * 64] flattened array
-    
-    // Compute MEAN over time (axis=1) for each coefficient
-    // Input is row-major: [c0t0, c0t1... c0tN, c1t0... ]
-    final inputFeatures = Float32List(13);
-    final int frames = 64; // maxPadLen from extractor
+    final features = _mfcc.extract(window);
 
+    // Compute MEAN over time - use actual frame count, not 64!
+    // Unfilled frames are zeros; dividing by 64 skews the mean.
+    final int maxPadLen = 64;
+    final actualFrames = MfccExtractor.actualFrameCount(
+      window.length,
+      _mfcc.nFft,
+      _mfcc.hopLength,
+      maxPadLen,
+    );
+
+    final inputFeatures = Float32List(13);
     for (int c = 0; c < 13; c++) {
       double sum = 0.0;
-      for (int t = 0; t < frames; t++) {
-        sum += features[c * frames + t];
+      for (int t = 0; t < actualFrames; t++) {
+        sum += features[c * maxPadLen + t];
       }
-      inputFeatures[c] = sum / frames;
+      inputFeatures[c] = sum / actualFrames;
     }
 
     // Prepare input [1, 13]
-    final input = [inputFeatures]; // dimensions: [1, 13]
-    
-    // DEBUG: heavy logging to diagnose
-    print('DEBUG: MFCC Mean: $inputFeatures');
+    final input = [inputFeatures];
 
     // Prepare output [1, numClasses]
     final numClasses = _labels.length;
@@ -321,15 +324,6 @@ class KwsService {
     }
 
     // Check threshold
-    // DEBUG: Print all detections to see what's happening
-    final List<String> debugProbs = [];
-    for (int i = 0; i < numClasses; i++) {
-        debugProbs.add('${_labels[i]}: ${probs[i].toStringAsFixed(4)}');
-    }
-    print('DEBUG: Inference Result - $debugProbs');
-
-    // print('DEBUG: Inference Result - Max Conf: ${maxConf.toStringAsFixed(4)} | Index: $maxIdx | Label: ${_labels[maxIdx]}');
-
     if (maxConf >= AppConstants.defaultConfidenceThreshold) {
       final name = _labels[maxIdx] ?? 'Unknown';
       if (name == '_background_noise_') return; // Must ignore background!

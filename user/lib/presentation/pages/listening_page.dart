@@ -1,11 +1,13 @@
-// VIBRO Listening Page — Real-time keyword spotting UI
+// VIBRO Listening Page — Real-time name detection (speech_to_text, blablabala-style)
+// https://github.com/callme-ADHI/blablabala
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // New
-import 'package:vibration/vibration.dart'; // New
-import '../../core/services/kws_service.dart';
-import '../../core/services/training_service.dart'; // New
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:vibration/vibration.dart';
+import '../../core/services/recognition_service.dart';
+import '../../core/services/name_service.dart';
+import '../../core/services/kws_service.dart'; // DetectionEvent
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 
@@ -18,23 +20,20 @@ class ListeningPage extends StatefulWidget {
 
 class _ListeningPageState extends State<ListeningPage>
     with SingleTickerProviderStateMixin {
-  final KwsService _kws = KwsService.instance;
+  final RecognitionService _recognition = RecognitionService.instance;
+  final NameService _nameService = NameService.instance;
   bool _isListening = false;
-  bool _isModelLoaded = false;
-  bool _isLoadingModel = true;
+  bool _isReady = false;
+  bool _isLoading = true;
   StreamSubscription<DetectionEvent>? _detectionSub;
   final List<DetectionEvent> _detections = [];
+  List<String> _availableNames = [];
+  final Set<String> _selectedNames = {};
 
-  // Pulse animation
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
-
-  // Notifications
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
-
-  // Name Selection
-  final Set<String> _selectedNames = {};
 
   @override
   void initState() {
@@ -48,40 +47,33 @@ class _ListeningPageState extends State<ListeningPage>
     );
 
     _initNotifications();
-    _checkAndLoadModel();
+    _loadNamesAndInit();
   }
 
-  Future<void> _checkAndLoadModel() async {
-    setState(() => _isLoadingModel = true);
-    
-    // 1. Try to download update first
+  Future<void> _loadNamesAndInit() async {
+    setState(() => _isLoading = true);
     try {
-      print('DEBUG: Checking for model updates...');
-      final updated = await TrainingService.instance.downloadModelIfNeeded();
-      if (updated) {
-        print('DEBUG: Model updated successfully');
-        if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Model updated to latest version!')),
-          );
-        }
-      } else {
-        print('DEBUG: No model update needed');
+      final namesData = await _nameService.getNames();
+      final names = namesData
+          .map((n) => (n['name_label'] as String?) ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (mounted) {
+        setState(() {
+          _availableNames = names;
+          _selectedNames.addAll(names);
+          _isReady = names.isNotEmpty;
+          _isLoading = false;
+        });
       }
     } catch (e) {
-      print('DEBUG: Update check failed: $e');
-    }
-
-    // 2. Load model
-    final loaded = await _kws.loadModel();
-    if (mounted) {
-      setState(() {
-        _isModelLoaded = loaded;
-        _isLoadingModel = false;
-        if (loaded) {
-          _selectedNames.addAll(_kws.labelNames); // Select all by default
-        }
-      });
+      if (mounted) {
+        setState(() {
+          _availableNames = [];
+          _isReady = false;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -97,7 +89,7 @@ class _ListeningPageState extends State<ListeningPage>
   }
 
   void _toggleListening() {
-    if (!_isModelLoaded) return;
+    if (!_isReady || _selectedNames.isEmpty) return;
 
     if (_isListening) {
       _stopListening();
@@ -106,9 +98,19 @@ class _ListeningPageState extends State<ListeningPage>
     }
   }
 
-  void _startListening() {
-    final stream = _kws.startListening();
+  void _startListening() async {
+    final initialized =
+        await _recognition.initialize(_selectedNames);
+    if (!initialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Speech recognition not available')),
+        );
+      }
+      return;
+    }
 
+    final stream = _recognition.startListening();
     _detectionSub = stream.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -116,8 +118,8 @@ class _ListeningPageState extends State<ListeningPage>
         if (_detections.length > 50) _detections.removeLast();
       });
 
-      // Feedback for > 40% confidence AND if name is selected
-      if (event.confidence > 0.40 && _selectedNames.contains(event.name)) {
+      // Feedback when name is selected (speech_to_text uses 60% threshold)
+      if (_selectedNames.contains(event.name)) {
         _triggerFeedback(event);
       }
     });
@@ -169,7 +171,7 @@ class _ListeningPageState extends State<ListeningPage>
   }
 
   void _stopListening() {
-    _kws.stopListening();
+    _recognition.stopListening();
     _detectionSub?.cancel();
     _detectionSub = null;
     _pulseCtrl.stop();
@@ -248,7 +250,7 @@ class _ListeningPageState extends State<ListeningPage>
           ),
           
           // ── Name Selection Chips ──
-          if (_isModelLoaded && _kws.labelNames.isNotEmpty)
+          if (_isReady && _availableNames.isNotEmpty)
              _buildNameSelection(),
 
           const SizedBox(height: 10),
@@ -308,7 +310,7 @@ class _ListeningPageState extends State<ListeningPage>
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _kws.labelNames.map((name) {
+            children: _availableNames.map((name) {
               final isSelected = _selectedNames.contains(name);
               return FilterChip(
                 label: Text(name),
@@ -350,7 +352,7 @@ class _ListeningPageState extends State<ListeningPage>
     return Column(
       children: [
         GestureDetector(
-          onTap: _isLoadingModel ? null : _toggleListening,
+          onTap: _isLoading ? null : _toggleListening,
           child: AnimatedBuilder(
             animation: _pulseAnim,
             builder: (context, child) {
@@ -385,11 +387,11 @@ class _ListeningPageState extends State<ListeningPage>
                       child: Icon(
                         _isListening
                             ? Icons.mic_rounded
-                            : (_isModelLoaded
+                            : (_isReady
                                 ? Icons.mic_none_rounded
                                 : Icons.mic_off_rounded),
                         size: 44,
-                        color: _isListening || !_isModelLoaded
+                        color: _isListening || !_isReady
                             ? AppColors.white
                             : AppColors.primaryNavy,
                       ),
@@ -419,23 +421,23 @@ class _ListeningPageState extends State<ListeningPage>
   }
 
   Color get _buttonColor {
-    if (_isLoadingModel) return AppColors.textSecondary;
+    if (_isLoading) return AppColors.textSecondary;
     if (_isListening) return AppColors.primaryNavy;
-    if (!_isModelLoaded) return AppColors.textSecondary;
+    if (!_isReady) return AppColors.textSecondary;
     return AppColors.white;
   }
 
   String get _statusText {
-    if (_isLoadingModel) return 'Loading Model...';
-    if (!_isModelLoaded) return 'No Model Available';
+    if (_isLoading) return 'Loading...';
+    if (!_isReady) return 'Add Names First';
     if (_isListening) return 'Listening...';
     return 'Ready';
   }
 
   String get _subtitleText {
-    if (_isLoadingModel) return 'Please wait';
-    if (!_isModelLoaded) return 'Train a model first';
-    if (_isListening) return 'Detecting voices in real-time';
+    if (_isLoading) return 'Please wait';
+    if (!_isReady) return 'Add names to detect';
+    if (_isListening) return 'Speech recognition active (100s on / 3s off)';
     return 'Tap to start listening';
   }
 
@@ -455,19 +457,19 @@ class _ListeningPageState extends State<ListeningPage>
       child: Column(
         children: [
           _buildInfoRow(
-            'Model',
-            _isLoadingModel
+            'Engine',
+            _isLoading
                 ? 'Loading...'
-                : (_isModelLoaded ? 'Loaded ✓' : 'Not found'),
-            _isModelLoaded ? AppColors.success : AppColors.error,
+                : (_isReady ? 'Speech-to-Text ✓' : 'Not ready'),
+            _isReady ? AppColors.success : AppColors.error,
           ),
           const Divider(color: AppColors.divider, height: 20),
           _buildInfoRow(
             'Names',
-            _isModelLoaded
-                ? _kws.labelNames.join(', ')
+            _isReady
+                ? _availableNames.join(', ')
                 : '—',
-            _isModelLoaded ? AppColors.accentNavy : AppColors.textSecondary,
+            _isReady ? AppColors.accentNavy : AppColors.textSecondary,
           ),
           const Divider(color: AppColors.divider, height: 20),
           _buildInfoRow(

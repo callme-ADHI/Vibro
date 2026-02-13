@@ -28,14 +28,13 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # ═══════════════════════════════════════════════════
 # CONFIG (service role key — keep private)
 # ═══════════════════════════════════════════════════
-# Configuration
-# Updated credentials
-# Credentials Input (User must provide at runtime)
-# IMPORTANT: DO NOT COMMIT REAL KEYS TO GIT
+# Set SUPABASE_SERVICE_KEY in Colab: Runtime → Secrets, or env vars
+# Or run: SUPABASE_SERVICE_KEY = "your_key" before running
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-# SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
-SUPABASE_SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
+if not SUPABASE_SERVICE_KEY:
+    raise ValueError("Set SUPABASE_SERVICE_KEY env or in Colab secrets. Do not commit real keys.")
 if SUPABASE_SERVICE_KEY.startswith("sb_publishable"):
     print("\n⚠️ WARNING: You have entered a PUBLIC ANON KEY (sb_publishable...).")
     print("   This script requires the SERVICE ROLE SECRET (starts with sb_service_role...) to see all user data.")
