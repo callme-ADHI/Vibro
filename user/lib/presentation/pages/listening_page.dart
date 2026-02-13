@@ -1,9 +1,13 @@
-// VIBRO Listening Page — Real-time voice detection status
+// VIBRO Listening Page — Real-time keyword spotting UI
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // New
+import 'package:vibration/vibration.dart'; // New
+import '../../core/services/kws_service.dart';
+import '../../core/services/training_service.dart'; // New
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-
-enum ListeningState { idle, listening, paused, error }
 
 class ListeningPage extends StatefulWidget {
   const ListeningPage({super.key});
@@ -12,56 +16,172 @@ class ListeningPage extends StatefulWidget {
   State<ListeningPage> createState() => _ListeningPageState();
 }
 
-class _ListeningPageState extends State<ListeningPage> {
-  ListeningState _state = ListeningState.idle;
+class _ListeningPageState extends State<ListeningPage>
+    with SingleTickerProviderStateMixin {
+  final KwsService _kws = KwsService.instance;
+  bool _isListening = false;
+  bool _isModelLoaded = false;
+  bool _isLoadingModel = true;
+  StreamSubscription<DetectionEvent>? _detectionSub;
+  final List<DetectionEvent> _detections = [];
+
+  // Pulse animation
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseAnim;
+
+  // Notifications
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
+
+  // Name Selection
+  final Set<String> _selectedNames = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.3).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+
+    _initNotifications();
+    _checkAndLoadModel();
+  }
+
+  Future<void> _checkAndLoadModel() async {
+    setState(() => _isLoadingModel = true);
+    
+    // 1. Try to download update first
+    try {
+      print('DEBUG: Checking for model updates...');
+      final updated = await TrainingService.instance.downloadModelIfNeeded();
+      if (updated) {
+        print('DEBUG: Model updated successfully');
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Model updated to latest version!')),
+          );
+        }
+      } else {
+        print('DEBUG: No model update needed');
+      }
+    } catch (e) {
+      print('DEBUG: Update check failed: $e');
+    }
+
+    // 2. Load model
+    final loaded = await _kws.loadModel();
+    if (mounted) {
+      setState(() {
+        _isModelLoaded = loaded;
+        _isLoadingModel = false;
+        if (loaded) {
+          _selectedNames.addAll(_kws.labelNames); // Select all by default
+        }
+      });
+    }
+  }
+
+  Future<void> _initNotifications() async {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const settings = InitializationSettings(android: android);
+    await _notifications.initialize(settings);
+
+    // Request permission for Android 13+
+    final platform = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await platform?.requestNotificationsPermission();
+  }
 
   void _toggleListening() {
-    setState(() {
-      if (_state == ListeningState.listening) {
-        _state = ListeningState.paused;
-      } else {
-        _state = ListeningState.listening;
+    if (!_isModelLoaded) return;
+
+    if (_isListening) {
+      _stopListening();
+    } else {
+      _startListening();
+    }
+  }
+
+  void _startListening() {
+    final stream = _kws.startListening();
+
+    _detectionSub = stream.listen((event) {
+      if (!mounted) return;
+      setState(() {
+        _detections.insert(0, event);
+        if (_detections.length > 50) _detections.removeLast();
+      });
+
+      // Feedback for > 40% confidence AND if name is selected
+      if (event.confidence > 0.40 && _selectedNames.contains(event.name)) {
+        _triggerFeedback(event);
       }
     });
+
+    _pulseCtrl.repeat(reverse: true);
+    setState(() => _isListening = true);
   }
 
-  String get _statusLabel {
-    switch (_state) {
-      case ListeningState.idle:
-        return 'Ready';
-      case ListeningState.listening:
-        return 'Listening';
-      case ListeningState.paused:
-        return 'Paused';
-      case ListeningState.error:
-        return 'Error';
+  Future<void> _triggerFeedback(DetectionEvent event) async {
+    // 1. Haptic Feedback
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(duration: 500); // 500ms vibration
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+
+    // 2. Notification
+    const androidDetails = AndroidNotificationDetails(
+      'vibro_detections',
+      'Detections',
+      channelDescription: 'Notifications for detected names',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    await _notifications.show(
+      0,
+      'Name Detected!',
+      'Heard "${event.name}" with ${(event.confidence * 100).toStringAsFixed(0)}% confidence',
+      details,
+    );
+
+    // 3. In-App SnackBar
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Detected: ${event.name} (${(event.confidence * 100).toStringAsFixed(0)}%)',
+            style: AppTypography.bodyMedium(color: AppColors.white),
+          ),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
-  Color get _statusColor {
-    switch (_state) {
-      case ListeningState.idle:
-        return AppColors.textSecondary;
-      case ListeningState.listening:
-        return AppColors.success;
-      case ListeningState.paused:
-        return AppColors.warning;
-      case ListeningState.error:
-        return AppColors.error;
-    }
+  void _stopListening() {
+    _kws.stopListening();
+    _detectionSub?.cancel();
+    _detectionSub = null;
+    _pulseCtrl.stop();
+    _pulseCtrl.reset();
+    setState(() => _isListening = false);
   }
 
-  IconData get _statusIcon {
-    switch (_state) {
-      case ListeningState.idle:
-        return Icons.mic_off_rounded;
-      case ListeningState.listening:
-        return Icons.mic_rounded;
-      case ListeningState.paused:
-        return Icons.pause_rounded;
-      case ListeningState.error:
-        return Icons.error_outline_rounded;
-    }
+  @override
+  void dispose() {
+    _stopListening();
+    _pulseCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -75,140 +195,445 @@ class _ListeningPageState extends State<ListeningPage> {
         automaticallyImplyLeading: false,
         title: Text(
           'Listening',
-          style: AppTypography.pageTitle(color: AppColors.textPrimary).copyWith(fontSize: 22),
+          style: AppTypography.pageTitle(color: AppColors.textPrimary)
+              .copyWith(fontSize: 22),
         ),
+        actions: [
+          if (_isListening)
+            Container(
+              margin: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: AppColors.success,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'LIVE',
+                    style: AppTypography.bodySmall(color: AppColors.success)
+                        .copyWith(fontWeight: FontWeight.w700, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: AppColors.divider),
         ),
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Status circle
-              GestureDetector(
-                onTap: _toggleListening,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    color: _state == ListeningState.listening
-                        ? AppColors.primaryNavy
-                        : AppColors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: _state == ListeningState.listening
-                          ? AppColors.primaryNavy
-                          : AppColors.divider,
-                      width: 2,
+      body: Column(
+        children: [
+          // ── Top Section: Mic Button ──
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: _buildMicButton(),
+          ),
+
+          // ── Model Info Card ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _buildModelCard(),
+          ),
+          
+          // ── Name Selection Chips ──
+          if (_isModelLoaded && _kws.labelNames.isNotEmpty)
+             _buildNameSelection(),
+
+          const SizedBox(height: 10),
+
+          // ── Detection Log Header ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Text(
+                  'Detection Log',
+                  style: AppTypography.sectionTitle(color: AppColors.textPrimary),
+                ),
+                const Spacer(),
+                if (_detections.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => setState(() => _detections.clear()),
+                    child: Text(
+                      'Clear',
+                      style: AppTypography.bodySmall(color: AppColors.accentNavy)
+                          .copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
-                  child: Center(
-                    child: Icon(
-                      _statusIcon,
-                      size: 48,
-                      color: _state == ListeningState.listening
-                          ? AppColors.white
-                          : AppColors.primaryNavy,
-                    ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // ── Detection List ──
+          Expanded(
+            child: _detections.isEmpty
+                ? _buildEmptyLog()
+                : _buildDetectionList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  NAME SELECTION
+  // ═══════════════════════════════════════════
+  
+  Widget _buildNameSelection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+           Text(
+            'Active Names',
+            style: AppTypography.bodySmall(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _kws.labelNames.map((name) {
+              final isSelected = _selectedNames.contains(name);
+              return FilterChip(
+                label: Text(name),
+                selected: isSelected,
+                onSelected: (bool selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedNames.add(name);
+                    } else {
+                      _selectedNames.remove(name);
+                    }
+                  });
+                },
+                backgroundColor: AppColors.white,
+                selectedColor: AppColors.primaryNavy.withValues(alpha: 0.2),
+                checkmarkColor: AppColors.primaryNavy,
+                labelStyle: AppTypography.bodySmall(
+                  color: isSelected ? AppColors.primaryNavy : AppColors.textPrimary,
+                ).copyWith(fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: isSelected ? AppColors.primaryNavy : AppColors.divider,
                   ),
                 ),
-              ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
 
-              const SizedBox(height: 28),
+  // ═══════════════════════════════════════════
+  //  MIC BUTTON
+  // ═══════════════════════════════════════════
 
-              // Status label
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: _statusColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _statusLabel,
-                    style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(
-                      fontSize: 18,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              Text(
-                _state == ListeningState.listening
-                    ? 'Detecting voices in real-time'
-                    : 'Tap to start listening',
-                style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-              ),
-
-              const SizedBox(height: 40),
-
-              // Device Status
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
+  Widget _buildMicButton() {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: _isLoadingModel ? null : _toggleListening,
+          child: AnimatedBuilder(
+            animation: _pulseAnim,
+            builder: (context, child) {
+              return Container(
+                width: 160,
+                height: 160,
                 decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.divider),
+                  shape: BoxShape.circle,
+                  color: _isListening
+                      ? AppColors.primaryNavy.withValues(alpha: 0.06)
+                      : Colors.transparent,
                 ),
-                child: Column(
-                  children: [
-                    _buildInfoRow('ESP32', 'Not Connected', AppColors.error),
-                    const Divider(color: AppColors.divider, height: 24),
-                    _buildInfoRow('Microphone', 'Available', AppColors.success),
-                    const Divider(color: AppColors.divider, height: 24),
-                    _buildInfoRow('Model', 'Default', AppColors.textSecondary),
-                  ],
+                child: Center(
+                  child: Transform.scale(
+                    scale: _isListening ? _pulseAnim.value : 1.0,
+                    child: Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _buttonColor,
+                        boxShadow: _isListening
+                            ? [
+                                BoxShadow(
+                                  color: AppColors.primaryNavy.withValues(alpha: 0.25),
+                                  blurRadius: 24,
+                                  spreadRadius: 4,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Icon(
+                        _isListening
+                            ? Icons.mic_rounded
+                            : (_isModelLoaded
+                                ? Icons.mic_none_rounded
+                                : Icons.mic_off_rounded),
+                        size: 44,
+                        color: _isListening || !_isModelLoaded
+                            ? AppColors.white
+                            : AppColors.primaryNavy,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Status text
+        Text(
+          _statusText,
+          style: AppTypography.sectionTitle(color: AppColors.textPrimary)
+              .copyWith(fontSize: 17),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _subtitleText,
+          style: AppTypography.bodySmall(color: AppColors.textSecondary),
+        ),
+      ],
+    );
+  }
+
+  Color get _buttonColor {
+    if (_isLoadingModel) return AppColors.textSecondary;
+    if (_isListening) return AppColors.primaryNavy;
+    if (!_isModelLoaded) return AppColors.textSecondary;
+    return AppColors.white;
+  }
+
+  String get _statusText {
+    if (_isLoadingModel) return 'Loading Model...';
+    if (!_isModelLoaded) return 'No Model Available';
+    if (_isListening) return 'Listening...';
+    return 'Ready';
+  }
+
+  String get _subtitleText {
+    if (_isLoadingModel) return 'Please wait';
+    if (!_isModelLoaded) return 'Train a model first';
+    if (_isListening) return 'Detecting voices in real-time';
+    return 'Tap to start listening';
+  }
+
+  // ═══════════════════════════════════════════
+  //  MODEL INFO CARD
+  // ═══════════════════════════════════════════
+
+  Widget _buildModelCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        children: [
+          _buildInfoRow(
+            'Model',
+            _isLoadingModel
+                ? 'Loading...'
+                : (_isModelLoaded ? 'Loaded ✓' : 'Not found'),
+            _isModelLoaded ? AppColors.success : AppColors.error,
+          ),
+          const Divider(color: AppColors.divider, height: 20),
+          _buildInfoRow(
+            'Names',
+            _isModelLoaded
+                ? _kws.labelNames.join(', ')
+                : '—',
+            _isModelLoaded ? AppColors.accentNavy : AppColors.textSecondary,
+          ),
+          const Divider(color: AppColors.divider, height: 20),
+          _buildInfoRow(
+            'Status',
+            _isListening ? 'Active' : 'Idle',
+            _isListening ? AppColors.success : AppColors.textSecondary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label,
+            style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  value,
+                  style: AppTypography.bodyMedium(color: AppColors.textPrimary)
+                      .copyWith(fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  DETECTION LOG
+  // ═══════════════════════════════════════════
+
+  Widget _buildEmptyLog() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _isListening
+                ? Icons.hearing_rounded
+                : Icons.format_list_bulleted_rounded,
+            size: 40,
+            color: AppColors.textSecondary.withValues(alpha: 0.4),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _isListening
+                ? 'Waiting for a voice match...'
+                : 'Detections will appear here',
+            style: AppTypography.bodyMedium(color: AppColors.textSecondary),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildInfoRow(String label, String value, Color statusColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-        ),
-        Row(
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
-              ),
+  Widget _buildDetectionList() {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      itemCount: _detections.length,
+      separatorBuilder: (_, _a) => const SizedBox(height: 8),
+      itemBuilder: (_, index) {
+        final det = _detections[index];
+        final confidence = (det.confidence * 100).toStringAsFixed(1);
+        final time =
+            '${det.timestamp.hour.toString().padLeft(2, '0')}:${det.timestamp.minute.toString().padLeft(2, '0')}:${det.timestamp.second.toString().padLeft(2, '0')}';
+
+        final isNew = index == 0 &&
+            DateTime.now().difference(det.timestamp).inSeconds < 3;
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: isNew
+                ? AppColors.success.withValues(alpha: 0.08)
+                : AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isNew ? AppColors.success.withValues(alpha: 0.3) : AppColors.divider,
             ),
-            const SizedBox(width: 8),
-            Text(
-              value,
-              style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
-                fontWeight: FontWeight.w500,
+          ),
+          child: Row(
+            children: [
+              // Name avatar
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Text(
+                    det.name.isNotEmpty
+                        ? det.name[0].toUpperCase()
+                        : '?',
+                    style: AppTypography.sectionTitle(color: AppColors.primaryNavy)
+                        .copyWith(fontSize: 18),
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
+
+              const SizedBox(width: 14),
+
+              // Name + time
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      det.name,
+                      style:
+                          AppTypography.bodyMedium(color: AppColors.textPrimary)
+                              .copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      time,
+                      style:
+                          AppTypography.bodySmall(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Confidence badge
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _confidenceColor(det.confidence).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$confidence%',
+                  style: AppTypography.bodySmall(
+                    color: _confidenceColor(det.confidence),
+                  ).copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
+  }
+
+  Color _confidenceColor(double confidence) {
+    if (confidence >= 0.8) return AppColors.success;
+    if (confidence >= 0.6) return AppColors.accentNavy;
+    return AppColors.warning;
   }
 }

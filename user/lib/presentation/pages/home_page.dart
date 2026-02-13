@@ -18,6 +18,7 @@ class _HomePageState extends State<HomePage> {
   String _userEmail = '';
   TrainingStatus _trainingStatus = TrainingStatus.notStarted;
   int _trainingProgress = 0;
+  int _modelCount = 0;
 
   @override
   void initState() {
@@ -57,6 +58,20 @@ class _HomePageState extends State<HomePage> {
         _trainingProgress = status.progressPercentage;
       });
     }
+
+    // Load trained models count
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        final models = await Supabase.instance.client
+            .from('trained_models')
+            .select('id')
+            .eq('user_id', user.id);
+        if (mounted) {
+          setState(() => _modelCount = (models as List).length);
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -164,8 +179,8 @@ class _HomePageState extends State<HomePage> {
                 _buildFeatureCard(
                   icon: Icons.record_voice_over_rounded,
                   title: 'Voice Models',
-                  subtitle: '0 trained',
-                  statusColor: AppColors.accentNavy,
+                  subtitle: '$_modelCount trained',
+                  statusColor: _modelCount > 0 ? AppColors.success : AppColors.accentNavy,
                 ),
                 _buildFeatureCard(
                   icon: Icons.search_rounded,

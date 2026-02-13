@@ -9,7 +9,7 @@ class AppConstants {
 
   // Detection Thresholds
   static const double minConfidenceThreshold = 0.40;
-  static const double defaultConfidenceThreshold = 0.49;
+  static const double defaultConfidenceThreshold = 0.40;
   static const double maxConfidenceThreshold = 0.80;
 
   // Audio Recording
