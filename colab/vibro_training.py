@@ -34,6 +34,7 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # IMPORTANT: DO NOT COMMIT REAL KEYS TO GIT
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
 SUPABASE_SERVICE_KEY = input("Enter Supabase Service Key (starts with sb_service_role...): ").strip() if "get_ipython" in globals() else os.environ.get("SUPABASE_KEY", "YOUR_SERVICE_KEY_HERE")
+# SUPABASE_SERVICE_KEY = "YOUR_SERVICE_KEY_HERE"
 
 if SUPABASE_SERVICE_KEY.startswith("sb_publishable"):
     print("\n⚠️ WARNING: You have entered a PUBLIC ANON KEY (sb_publishable...).")

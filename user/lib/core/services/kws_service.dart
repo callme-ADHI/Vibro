@@ -161,7 +161,7 @@ class KwsService {
     _detectionController?.close();
     _detectionController = StreamController<DetectionEvent>.broadcast();
 
-    _startMicStream();
+    _startMicCycle();
 
     return _detectionController!.stream;
   }
@@ -169,6 +169,8 @@ class KwsService {
   /// Stop listening and release resources.
   void stopListening() {
     _isListening = false;
+    _dutyCycleTimer?.cancel();
+    _dutyCycleTimer = null;
     _inferenceTimer?.cancel();
     _inferenceTimer = null;
     _audioSub?.cancel();
@@ -193,16 +195,26 @@ class KwsService {
   //  PRIVATE — Audio Pipeline
   // ═══════════════════════════════════════════
 
-  Future<void> _startMicStream() async {
+  // 5s listening / 1s pause timer
+  Timer? _dutyCycleTimer;
+  bool _isMicActive = false;
+
+  Future<void> _startMicCycle() async {
     if (!_modelLoaded || _interpreter == null) return;
-
-    // Check permission
     if (!await _recorder.hasPermission()) return;
-
-    _audioBuffer.clear();
+    
     _isListening = true;
+    _runMicForDuration(const Duration(seconds: 5));
+  }
 
-    // Start mic stream
+  Future<void> _runMicForDuration(Duration duration) async {
+    if (!_isListening) return;
+
+    // Start Mic
+    print('DEBUG: KWS - Mic ON (5s)');
+    _isMicActive = true;
+    _audioBuffer.clear();
+    
     final stream = await _recorder.startStream(
       const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
@@ -212,21 +224,37 @@ class KwsService {
     );
 
     _audioSub = stream.listen((Uint8List chunk) {
-      // Convert PCM bytes to doubles
       final samples = MfccExtractor.pcmBytesToDoubles(chunk);
       _audioBuffer.addAll(samples);
-
-      // Keep only the latest _bufferSamples
-      if (_audioBuffer.length > _bufferSamples * 2) {
-        _audioBuffer.removeRange(0, _audioBuffer.length - _bufferSamples);
-      }
+      // Run inference more frequently now (every 500ms while mic is on)
     });
-
-    // Run inference periodically
+    
+    // Start Inference Timer
     _inferenceTimer = Timer.periodic(
-      const Duration(milliseconds: _inferencePeriodMs),
+      const Duration(milliseconds: 500),
       (_) => _runInference(),
     );
+
+    // Schedule Pause
+    _dutyCycleTimer = Timer(duration, () async {
+      await _pauseMicForDuration(const Duration(seconds: 1));
+    });
+  }
+
+  Future<void> _pauseMicForDuration(Duration duration) async {
+    if (!_isListening) return;
+
+    print('DEBUG: KWS - Mic PAUSE (1s)');
+    _isMicActive = false;
+    _inferenceTimer?.cancel();
+    _audioSub?.cancel();
+    await _recorder.stop();
+    _audioBuffer.clear();
+
+    // Schedule Resume
+    _dutyCycleTimer = Timer(duration, () {
+      _runMicForDuration(const Duration(seconds: 5));
+    });
   }
 
   void _runInference() {
