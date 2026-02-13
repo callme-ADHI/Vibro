@@ -5,7 +5,7 @@ import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/constants/app_constants.dart';
 import 'signup_page.dart';
-import 'home_page.dart';
+import 'main_shell.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -53,7 +53,7 @@ class _LoginPageState extends State<LoginPage> {
 
       if (response.user != null) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const HomePage()),
+          MaterialPageRoute(builder: (_) => const MainShell()),
           (route) => false,
         );
       }

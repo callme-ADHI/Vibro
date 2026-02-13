@@ -7,7 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/constants/app_constants.dart';
 import 'login_page.dart';
-import 'home_page.dart';
+import 'main_shell.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -59,7 +59,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        MaterialPageRoute(builder: (_) => const MainShell()),
       );
     } else {
       Navigator.of(context).pushReplacement(

@@ -1,10 +1,8 @@
-// VIBRO Home Page — White & Navy Enterprise
+// VIBRO Home Page — White & Navy Enterprise (Tab Content)
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../core/services/auth_service.dart';
-import 'login_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -46,28 +44,6 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  Future<void> _signOut() async {
-    try {
-      await AuthService.instance.signOut();
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (route) => false,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sign out failed: $e'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -76,6 +52,7 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: AppColors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
+        automaticallyImplyLeading: false,
         title: Row(
           children: [
             Container(
@@ -103,16 +80,6 @@ class _HomePageState extends State<HomePage> {
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: AppColors.divider),
         ),
-        actions: [
-          TextButton(
-            onPressed: _signOut,
-            child: Text(
-              'Sign Out',
-              style: AppTypography.metadata(color: AppColors.textSecondary),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -256,7 +223,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 16),
           ],
         ),
       ),
