@@ -1,10 +1,9 @@
-// VIBRO Home Page - Post-Login Dashboard
+// VIBRO Home Page — White & Navy Enterprise
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
-import '../../core/constants/app_constants.dart';
-import '../widgets/vibro_card.dart';
 import 'login_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -15,64 +14,55 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _auth = AuthService.instance;
-  Map<String, dynamic>? _profile;
-  bool _isLoadingProfile = true;
+  String _userName = 'User';
+  String _userEmail = '';
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _loadUserProfile();
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> _loadUserProfile() async {
     try {
-      final profile = await _auth.getUserProfile();
-      if (mounted) {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
         setState(() {
-          _profile = profile;
-          _isLoadingProfile = false;
+          _userEmail = user.email ?? '';
         });
+
+        final response = await Supabase.instance.client
+            .from('profiles')
+            .select('username')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (mounted && response != null && response['username'] != null) {
+          setState(() {
+            _userName = response['username'];
+          });
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingProfile = false);
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _signOut() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.cardBackground,
-        title: Text('Sign Out', style: AppTypography.sectionTitle()),
-        content: Text(
-          'Are you sure you want to sign out?',
-          style: AppTypography.bodyMedium(color: AppColors.secondaryText),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: AppTypography.bodyMedium(color: AppColors.secondaryText)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: Text('Sign Out', style: AppTypography.bodyMedium(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && mounted) {
-      await _auth.signOut();
+    try {
+      await AuthService.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
           (route) => false,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sign out failed: $e'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -80,252 +70,267 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final email = _auth.currentEmail ?? 'User';
-    final username = _profile?['username'] as String?;
-    final displayName = username ?? email.split('@').first;
-
     return Scaffold(
-      backgroundColor: AppColors.deepNavy,
+      backgroundColor: AppColors.lightSurface,
       appBar: AppBar(
-        backgroundColor: AppColors.deepNavy,
+        backgroundColor: AppColors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
         title: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                color: AppColors.steelBlue.withOpacity(0.15),
-                shape: BoxShape.circle,
+                color: AppColors.primaryNavy,
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: Center(
-                child: Text(
-                  displayName[0].toUpperCase(),
-                  style: const TextStyle(
-                    color: AppColors.steelBlue,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
+              child: const Center(
+                child: Icon(Icons.graphic_eq_rounded, size: 18, color: AppColors.white),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppConstants.appName,
-                    style: AppTypography.cardTitle(color: AppColors.primaryText),
-                  ),
-                ],
+            const SizedBox(width: 10),
+            Text(
+              'VIBRO',
+              style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(
+                letterSpacing: 2,
+                fontSize: 18,
               ),
             ),
           ],
         ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.divider),
+        ),
         actions: [
-          IconButton(
+          TextButton(
             onPressed: _signOut,
-            icon: const Icon(Icons.logout_rounded, color: AppColors.secondaryText),
-            tooltip: 'Sign Out',
+            child: Text(
+              'Sign Out',
+              style: AppTypography.metadata(color: AppColors.textSecondary),
+            ),
           ),
+          const SizedBox(width: 8),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Welcome Section
-              VibroCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Welcome Card
+            _buildCard(
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryNavy,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _userName.isNotEmpty ? _userName[0].toUpperCase() : 'U',
+                        style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.waving_hand_rounded, color: AppColors.warning, size: 24),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Welcome, $displayName!',
-                            style: AppTypography.sectionTitle(),
-                          ),
+                        Text(
+                          'Welcome back',
+                          style: AppTypography.metadata(color: AppColors.textSecondary),
                         ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _userName,
+                          style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
+                        ),
+                        if (_userEmail.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            _userEmail,
+                            style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12),
+                          ),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      email,
-                      style: AppTypography.bodySmall(color: AppColors.secondaryText),
-                    ),
-                    if (_isLoadingProfile) ...[
-                      const SizedBox(height: 12),
-                      const LinearProgressIndicator(
-                        backgroundColor: AppColors.deepNavy,
-                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.steelBlue),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Quick Stats Header
-              Text(
-                'Quick Access',
-                style: AppTypography.sectionTitle(),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Feature Cards Grid
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-                childAspectRatio: 1.1,
-                children: [
-                  _buildFeatureCard(
-                    Icons.mic_rounded,
-                    'Voice Models',
-                    'Train & manage',
-                    AppColors.steelBlue,
-                  ),
-                  _buildFeatureCard(
-                    Icons.history_rounded,
-                    'Detections',
-                    'View history',
-                    AppColors.success,
-                  ),
-                  _buildFeatureCard(
-                    Icons.location_on_rounded,
-                    'Locations',
-                    'Manage zones',
-                    AppColors.warning,
-                  ),
-                  _buildFeatureCard(
-                    Icons.watch_rounded,
-                    'Device',
-                    'ESP32 Ring',
-                    AppColors.confidenceMedium,
                   ),
                 ],
               ),
+            ),
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // Status Card
-              VibroCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: const BoxDecoration(
-                            color: AppColors.success,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'System Status',
-                          style: AppTypography.cardTitle(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildStatusRow('Authentication', 'Connected', AppColors.success),
-                    const SizedBox(height: 8),
-                    _buildStatusRow('Backend', 'Supabase Active', AppColors.success),
-                    const SizedBox(height: 8),
-                    _buildStatusRow('ESP32 Device', 'Not Paired', AppColors.secondaryText),
-                    const SizedBox(height: 8),
-                    _buildStatusRow('Detection', 'Idle', AppColors.secondaryText),
-                  ],
+            _buildSectionHeader('Features'),
+            const SizedBox(height: 12),
+
+            // Feature Grid
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 1.15,
+              children: [
+                _buildFeatureCard(
+                  icon: Icons.record_voice_over_rounded,
+                  title: 'Voice Models',
+                  subtitle: '0 trained',
+                  statusColor: AppColors.accentNavy,
                 ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Subscription Info
-              VibroCard(
-                child: Row(
-                  children: [
-                    const Icon(Icons.diamond_rounded, color: AppColors.steelBlue, size: 24),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Basic Plan',
-                            style: AppTypography.cardTitle(),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '3 voice models • 2 locations',
-                            style: AppTypography.bodySmall(color: AppColors.secondaryText),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.steelBlue.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        'Active',
-                        style: AppTypography.metadata(color: AppColors.steelBlue),
-                      ),
-                    ),
-                  ],
+                _buildFeatureCard(
+                  icon: Icons.search_rounded,
+                  title: 'Detections',
+                  subtitle: 'No activity',
+                  statusColor: AppColors.textSecondary,
                 ),
+                _buildFeatureCard(
+                  icon: Icons.location_on_rounded,
+                  title: 'Locations',
+                  subtitle: '0 configured',
+                  statusColor: AppColors.success,
+                ),
+                _buildFeatureCard(
+                  icon: Icons.developer_board_rounded,
+                  title: 'Device',
+                  subtitle: 'Not connected',
+                  statusColor: AppColors.warning,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            _buildSectionHeader('System Status'),
+            const SizedBox(height: 12),
+
+            _buildCard(
+              child: Column(
+                children: [
+                  _buildStatusRow('ESP32 Device', 'Not Connected', AppColors.error),
+                  const Divider(color: AppColors.divider, height: 1),
+                  _buildStatusRow('Detection', 'Idle', AppColors.textSecondary),
+                  const Divider(color: AppColors.divider, height: 1),
+                  _buildStatusRow('Cloud Sync', 'Active', AppColors.success),
+                ],
               ),
-            ],
-          ),
+            ),
+
+            const SizedBox(height: 24),
+
+            _buildSectionHeader('Subscription'),
+            const SizedBox(height: 12),
+
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryNavy,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'BASIC',
+                      style: AppTypography.metadata(color: AppColors.white).copyWith(
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.5,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '3 Voice Models  •  2 Locations',
+                    style: AppTypography.bodyMedium(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 32),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildFeatureCard(IconData icon, String title, String subtitle, Color color) {
-    return VibroCard(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$title — coming soon!'),
-            backgroundColor: AppColors.steelBlue,
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      },
+  // ──────────────── Builders ────────────────
+
+  Widget _buildCard({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Text(
+      title,
+      style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  Widget _buildFeatureCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color statusColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.divider),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(height: 12),
-          Text(title, style: AppTypography.cardTitle()),
-          const SizedBox(height: 4),
+          Icon(icon, color: AppColors.primaryNavy, size: 26),
+          const SizedBox(height: 14),
           Text(
-            subtitle,
-            style: AppTypography.metadata(color: AppColors.secondaryText),
+            title,
+            style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                subtitle,
+                style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12),
+              ),
+            ],
           ),
         ],
       ),
@@ -333,25 +338,34 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildStatusRow(String label, String value, Color statusColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: AppTypography.bodySmall(color: AppColors.secondaryText)),
-        Row(
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: AppTypography.bodyMedium(color: AppColors.textSecondary).copyWith(fontSize: 14),
+          ),
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
               ),
-            ),
-            const SizedBox(width: 6),
-            Text(value, style: AppTypography.bodySmall(color: statusColor)),
-          ],
-        ),
-      ],
+              const SizedBox(width: 8),
+              Text(
+                value,
+                style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

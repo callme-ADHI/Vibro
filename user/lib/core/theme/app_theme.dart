@@ -1,4 +1,4 @@
-// VIBRO Theme Configuration
+// VIBRO Theme Configuration — White & Navy Enterprise
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'app_colors.dart';
@@ -7,208 +7,167 @@ import 'app_typography.dart';
 class AppTheme {
   AppTheme._();
 
-  /// Main VIBRO Dark Theme
+  /// VIBRO Light Enterprise Theme
   static ThemeData get darkTheme {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: AppColors.background,
-      
-      // Color Scheme
-      colorScheme: ColorScheme.dark(
-        primary: AppColors.steelBlue,
-        secondary: AppColors.silverGray,
-        surface: AppColors.cardBackground,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: AppColors.white,
+
+      colorScheme: ColorScheme.light(
+        primary: AppColors.primaryNavy,
+        secondary: AppColors.accentNavy,
+        surface: AppColors.white,
         error: AppColors.error,
-        onPrimary: AppColors.platinumWhite,
-        onSecondary: AppColors.platinumWhite,
-        onSurface: AppColors.primaryText,
-        onError: AppColors.platinumWhite,
+        onPrimary: AppColors.white,
+        onSecondary: AppColors.white,
+        onSurface: AppColors.textPrimary,
+        onError: AppColors.white,
       ),
 
-      // App Bar Theme
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.white,
         elevation: 0,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
-        iconTheme: IconThemeData(color: AppColors.platinumWhite),
-        titleTextStyle: AppTypography.pageTitle(color: AppColors.primaryText),
+        scrolledUnderElevation: 0,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          systemNavigationBarColor: AppColors.white,
+          systemNavigationBarIconBrightness: Brightness.dark,
+        ),
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+        titleTextStyle: AppTypography.pageTitle(color: AppColors.textPrimary),
       ),
 
-      // Card Theme
       cardTheme: CardThemeData(
-        color: AppColors.cardBackground,
-        elevation: 4,
-        shadowColor: Colors.black.withOpacity(0.12),
+        color: AppColors.white,
+        elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: AppColors.divider),
         ),
       ),
 
-      // Elevated Button Theme
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.steelBlue,
-          foregroundColor: AppColors.platinumWhite,
+          backgroundColor: AppColors.primaryNavy,
+          foregroundColor: AppColors.white,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
           ),
           textStyle: AppTypography.button(),
           minimumSize: const Size(0, 48),
         ),
       ),
 
-      // Outlined Button Theme
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.silverGray,
-          side: BorderSide(color: AppColors.silverGray, width: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          foregroundColor: AppColors.primaryNavy,
+          side: const BorderSide(color: AppColors.primaryNavy, width: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
           ),
           textStyle: AppTypography.button(),
           minimumSize: const Size(0, 48),
         ),
       ),
 
-      // Text Button Theme
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: AppColors.steelBlue,
+          foregroundColor: AppColors.accentNavy,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           textStyle: AppTypography.button(),
         ),
       ),
 
-      // Input Decoration Theme
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.cardBackground,
+        fillColor: AppColors.white,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.silverGray.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.divider),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.silverGray.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.divider),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.steelBlue, width: 2),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.primaryNavy, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.error),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.error),
         ),
-        labelStyle: AppTypography.bodyMedium(color: AppColors.secondaryText),
-        hintStyle: AppTypography.bodyMedium(color: AppColors.secondaryText.withOpacity(0.6)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        labelStyle: AppTypography.bodyMedium(color: AppColors.textSecondary),
+        hintStyle: AppTypography.bodyMedium(color: AppColors.textSecondary),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        prefixIconColor: AppColors.textSecondary,
+        suffixIconColor: AppColors.textSecondary,
       ),
 
-      // Switch Theme
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return AppColors.platinumWhite;
-          }
-          return AppColors.silverGray;
+          if (states.contains(WidgetState.selected)) return AppColors.white;
+          return AppColors.textSecondary;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return AppColors.steelBlue;
-          }
-          return AppColors.silverGray.withOpacity(0.3);
+          if (states.contains(WidgetState.selected)) return AppColors.accentNavy;
+          return AppColors.divider;
         }),
       ),
 
-      // Slider Theme
-      sliderTheme: SliderThemeData(
-        activeTrackColor: AppColors.steelBlue,
-        inactiveTrackColor: AppColors.silverGray.withOpacity(0.3),
-        thumbColor: AppColors.platinumWhite,
-        overlayColor: AppColors.steelBlue.withOpacity(0.2),
-        valueIndicatorColor: AppColors.steelBlue,
-        valueIndicatorTextStyle: AppTypography.bodySmall(color: AppColors.platinumWhite),
-      ),
-
-      // Dialog Theme
       dialogTheme: DialogThemeData(
-        backgroundColor: AppColors.cardBackground,
-        elevation: 8,
+        backgroundColor: AppColors.white,
+        elevation: 2,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
         ),
-        titleTextStyle: AppTypography.sectionTitle(color: AppColors.primaryText),
-        contentTextStyle: AppTypography.bodyMedium(color: AppColors.secondaryText),
+        titleTextStyle: AppTypography.sectionTitle(color: AppColors.textPrimary),
+        contentTextStyle: AppTypography.bodyMedium(color: AppColors.textSecondary),
       ),
 
-      // Bottom Navigation Bar Theme
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: AppColors.darkMidnight,
-        selectedItemColor: AppColors.steelBlue,
-        unselectedItemColor: AppColors.silverGray,
+        backgroundColor: AppColors.white,
+        selectedItemColor: AppColors.primaryNavy,
+        unselectedItemColor: AppColors.textSecondary,
         type: BottomNavigationBarType.fixed,
-        elevation: 8,
-        selectedLabelStyle: AppTypography.metadata(color: AppColors.steelBlue),
-        unselectedLabelStyle: AppTypography.metadata(color: AppColors.silverGray),
+        elevation: 0,
+        selectedLabelStyle: AppTypography.metadata(color: AppColors.primaryNavy),
+        unselectedLabelStyle: AppTypography.metadata(color: AppColors.textSecondary),
       ),
 
-      // Text Theme
       textTheme: TextTheme(
-        displayLarge: AppTypography.pageTitle(color: AppColors.primaryText),
-        displayMedium: AppTypography.sectionTitle(color: AppColors.primaryText),
-        displaySmall: AppTypography.cardTitle(color: AppColors.primaryText),
-        bodyLarge: AppTypography.bodyLarge(color: AppColors.primaryText),
-        bodyMedium: AppTypography.bodyMedium(color: AppColors.primaryText),
-        bodySmall: AppTypography.bodySmall(color: AppColors.secondaryText),
-        labelLarge: AppTypography.button(color: AppColors.platinumWhite),
-        labelMedium: AppTypography.metadata(color: AppColors.secondaryText),
+        displayLarge: AppTypography.pageTitle(color: AppColors.textPrimary),
+        displayMedium: AppTypography.sectionTitle(color: AppColors.textPrimary),
+        displaySmall: AppTypography.cardTitle(color: AppColors.textPrimary),
+        bodyLarge: AppTypography.bodyLarge(color: AppColors.textPrimary),
+        bodyMedium: AppTypography.bodyMedium(color: AppColors.textPrimary),
+        bodySmall: AppTypography.bodySmall(color: AppColors.textSecondary),
+        labelLarge: AppTypography.button(color: AppColors.white),
+        labelMedium: AppTypography.metadata(color: AppColors.textSecondary),
       ),
 
-      // Divider Theme
-      dividerTheme: DividerThemeData(
-        color: AppColors.silverGray.withOpacity(0.2),
+      dividerTheme: const DividerThemeData(
+        color: AppColors.divider,
         thickness: 1,
         space: 1,
       ),
 
-      // Icon Theme
-      iconTheme: IconThemeData(
-        color: AppColors.platinumWhite,
+      iconTheme: const IconThemeData(
+        color: AppColors.textPrimary,
         size: 24,
+      ),
+
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: AppColors.primaryNavy,
+        contentTextStyle: AppTypography.bodyMedium(color: AppColors.white),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
-}
-
-/// Custom Shadows for VIBRO
-class AppShadows {
-  AppShadows._();
-
-  static List<BoxShadow> get cardShadow => [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.12),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
-        ),
-      ];
-
-  static List<BoxShadow> get elevatedShadow => [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.15),
-          blurRadius: 16,
-          offset: const Offset(0, 6),
-        ),
-      ];
-
-  static List<BoxShadow> get subtleShadow => [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.08),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ];
 }

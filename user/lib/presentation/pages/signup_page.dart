@@ -1,10 +1,9 @@
-// VIBRO Sign Up Page - Email Registration
+// VIBRO Sign Up Page — White & Navy Enterprise
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/constants/app_constants.dart';
-import '../widgets/vibro_card.dart';
 import 'login_page.dart';
 
 class SignUpPage extends StatefulWidget {
@@ -38,22 +37,18 @@ class _SignUpPageState extends State<SignUpPage> {
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    // Validation
     if (name.isEmpty || name.length < 2) {
       _showError('Please enter your full name');
       return;
     }
-
     if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
       _showError('Please enter a valid email address');
       return;
     }
-
     if (password.isEmpty || password.length < 6) {
       _showError('Password must be at least 6 characters');
       return;
     }
-
     if (password != confirmPassword) {
       _showError('Passwords do not match');
       return;
@@ -71,23 +66,16 @@ class _SignUpPageState extends State<SignUpPage> {
       setState(() => _isLoading = false);
 
       if (response.user != null) {
-        // Save the username to profiles table
         try {
           await AuthService.instance.updateUsername(name);
-        } catch (_) {
-          // Profile might not be ready yet, that's OK
-        }
+        } catch (_) {}
 
-        // Check if email confirmation is required
         if (response.user!.emailConfirmedAt != null) {
-          // Email already confirmed (auto-confirm enabled)
-          _showSuccess('Welcome $name! You can now sign in.');
+          _showSuccess('Account created. You can now sign in.');
         } else {
-          // Email confirmation required
-          _showSuccess('Welcome $name! Check your email to confirm, then sign in.');
+          _showSuccess('Check your email to confirm, then sign in.');
         }
 
-        // Navigate back to login
         await Future.delayed(const Duration(seconds: 2));
         if (mounted) {
           Navigator.of(context).pushReplacement(
@@ -112,7 +100,6 @@ class _SignUpPageState extends State<SignUpPage> {
       } else {
         message = e.toString().replaceAll('Exception: ', '').replaceAll('AuthException: ', '');
       }
-
       _showError(message);
     }
   }
@@ -120,10 +107,10 @@ class _SignUpPageState extends State<SignUpPage> {
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: AppColors.white)),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.all(16),
       ),
     );
@@ -132,10 +119,10 @@ class _SignUpPageState extends State<SignUpPage> {
   void _showSuccess(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: AppColors.white)),
         backgroundColor: AppColors.success,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         duration: const Duration(seconds: 3),
         margin: const EdgeInsets.all(16),
       ),
@@ -145,25 +132,25 @@ class _SignUpPageState extends State<SignUpPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.deepNavy,
+      backgroundColor: AppColors.white,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-              // Back Button
+              // Back
               Align(
                 alignment: Alignment.centerLeft,
                 child: IconButton(
                   onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back_rounded, color: AppColors.primaryText),
+                  icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary, size: 22),
                   style: IconButton.styleFrom(
-                    backgroundColor: AppColors.cardBackground,
+                    backgroundColor: AppColors.lightSurface,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                 ),
@@ -174,175 +161,152 @@ class _SignUpPageState extends State<SignUpPage> {
               // Header
               Column(
                 children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: AppColors.success.withOpacity(0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Center(
-                      child: Icon(
-                        Icons.person_add_rounded,
-                        size: 40,
-                        color: AppColors.success,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
                   Text(
                     'Create Account',
-                    style: AppTypography.pageTitle(),
+                    style: AppTypography.pageTitle(color: AppColors.textPrimary),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   Text(
                     'Join ${AppConstants.appName} to get started',
-                    style: AppTypography.bodySmall(color: AppColors.secondaryText),
+                    style: AppTypography.bodySmall(color: AppColors.textSecondary),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 36),
+              const SizedBox(height: 32),
 
-              // Sign Up Form
-              VibroCard(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('Sign Up', style: AppTypography.sectionTitle()),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Fill in your details below',
-                        style: AppTypography.bodySmall(color: AppColors.secondaryText),
+              // Form Card
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Full Name
+                    _buildLabel('Full Name'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      style: AppTypography.bodyMedium(color: AppColors.textPrimary),
+                      decoration: _inputDecoration(
+                        hint: 'John Doe',
+                        icon: Icons.person_outline,
                       ),
-                      const SizedBox(height: 28),
+                    ),
 
-                      // Full Name
-                      TextField(
-                        controller: _nameController,
-                        textCapitalization: TextCapitalization.words,
-                        style: AppTypography.bodyMedium(),
-                        decoration: _inputDecoration(
-                          label: 'Full Name',
-                          hint: 'John Doe',
-                          icon: Icons.person_outline,
+                    const SizedBox(height: 20),
+
+                    // Email
+                    _buildLabel('Email'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: AppTypography.bodyMedium(color: AppColors.textPrimary),
+                      decoration: _inputDecoration(
+                        hint: 'your.email@example.com',
+                        icon: Icons.email_outlined,
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Password
+                    _buildLabel('Password'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      style: AppTypography.bodyMedium(color: AppColors.textPrimary),
+                      decoration: _inputDecoration(
+                        hint: 'Minimum 6 characters',
+                        icon: Icons.lock_outline,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                            color: AppColors.textSecondary,
+                            size: 20,
+                          ),
+                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                         ),
                       ),
+                    ),
 
-                      const SizedBox(height: 16),
+                    const SizedBox(height: 20),
 
-                      // Email
-                      TextField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        style: AppTypography.bodyMedium(),
-                        decoration: _inputDecoration(
-                          label: 'Email',
-                          hint: 'your.email@example.com',
-                          icon: Icons.email_outlined,
+                    // Confirm Password
+                    _buildLabel('Confirm Password'),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _confirmPasswordController,
+                      obscureText: _obscureConfirm,
+                      style: AppTypography.bodyMedium(color: AppColors.textPrimary),
+                      decoration: _inputDecoration(
+                        hint: 'Enter password again',
+                        icon: Icons.lock_outline,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureConfirm ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                            color: AppColors.textSecondary,
+                            size: 20,
+                          ),
+                          onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
                         ),
                       ),
+                    ),
 
-                      const SizedBox(height: 16),
+                    const SizedBox(height: 28),
 
-                      // Password
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        style: AppTypography.bodyMedium(),
-                        decoration: _inputDecoration(
-                          label: 'Password',
-                          hint: 'Minimum 6 characters',
-                          icon: Icons.lock_outline,
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    // Create Account Button — Navy
+                    SizedBox(
+                      height: 48,
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _signUp,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryNavy,
+                          foregroundColor: AppColors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Confirm Password
-                      TextField(
-                        controller: _confirmPasswordController,
-                        obscureText: _obscureConfirm,
-                        style: AppTypography.bodyMedium(),
-                        decoration: _inputDecoration(
-                          label: 'Confirm Password',
-                          hint: 'Enter password again',
-                          icon: Icons.lock_outline,
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureConfirm
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                            onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 28),
-
-                      // Sign Up Button
-                      SizedBox(
-                        height: 56,
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _signUp,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.success,
-                            foregroundColor: Colors.white,
-                            elevation: 2,
-                            shadowColor: AppColors.success.withOpacity(0.4),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 16,
-                            ),
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                  ),
-                                )
-                              : Text(
-                                  'Create Account',
-                                  style: AppTypography.bodyMedium(color: Colors.white).copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 16,
-                                  ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.white),
                                 ),
-                        ),
+                              )
+                            : Text(
+                                'Create Account',
+                                style: AppTypography.bodyMedium(color: AppColors.white).copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                              ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
 
               const SizedBox(height: 24),
 
-              // Back to Login
               Center(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       'Already have an account? ',
-                      style: AppTypography.bodySmall(color: AppColors.secondaryText),
+                      style: AppTypography.bodySmall(color: AppColors.textSecondary),
                     ),
                     TextButton(
                       onPressed: () {
@@ -351,12 +315,12 @@ class _SignUpPageState extends State<SignUpPage> {
                         );
                       },
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        minimumSize: const Size(40, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        minimumSize: const Size(40, 28),
                       ),
                       child: Text(
                         'Sign In',
-                        style: AppTypography.bodySmall(color: AppColors.steelBlue)
+                        style: AppTypography.bodySmall(color: AppColors.primaryNavy)
                             .copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -372,36 +336,41 @@ class _SignUpPageState extends State<SignUpPage> {
     );
   }
 
+  Widget _buildLabel(String text) {
+    return Text(
+      text,
+      style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(
+        fontWeight: FontWeight.w500,
+        fontSize: 13,
+      ),
+    );
+  }
+
   InputDecoration _inputDecoration({
-    required String label,
     required String hint,
     required IconData icon,
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
       hintText: hint,
-      prefixIcon: Icon(icon),
+      prefixIcon: Icon(icon, color: AppColors.textSecondary, size: 20),
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: AppColors.deepNavy,
+      fillColor: AppColors.lightSurface,
+      hintStyle: AppTypography.bodyMedium(color: AppColors.textSecondary),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.divider),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(
-          color: AppColors.secondaryText.withOpacity(0.1),
-        ),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.divider),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(
-          color: AppColors.steelBlue,
-          width: 2,
-        ),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.primaryNavy, width: 1.5),
       ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 }

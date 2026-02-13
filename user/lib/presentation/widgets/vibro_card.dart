@@ -1,7 +1,6 @@
-// VIBRO Custom Card Widget
+// VIBRO Custom Card Widget — White & Navy Enterprise
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_shadows.dart';
 
 class VibroCard extends StatelessWidget {
   final Widget child;
@@ -21,16 +20,16 @@ class VibroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: color ?? AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: AppShadows.cardShadow,
+        color: color ?? AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: padding ?? const EdgeInsets.all(20),
             child: child,

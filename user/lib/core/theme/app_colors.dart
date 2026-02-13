@@ -1,42 +1,39 @@
-// VIBRO Color System - Luxury Navy Blue Theme
+// VIBRO Color System — White & Navy Enterprise Theme
 import 'package:flutter/material.dart';
 
-/// Core color palette for VIBRO
-/// Following luxury, formal, medical-grade design principles
+/// Corporate-grade color palette for VIBRO
+/// White-dominant with Navy authority accents
 class AppColors {
   AppColors._();
 
-  // Primary Navy Palette
-  static const Color deepNavy = Color(0xFF0A1F44);
-  static const Color darkMidnight = Color(0xFF081A38);
-  static const Color steelBlue = Color(0xFF2E5BFF);
-  static const Color silverGray = Color(0xFFB8C2D1);
-  static const Color platinumWhite = Color(0xFFF5F7FA);
+  // Navy Hierarchy
+  static const Color deepNavy = Color(0xFF081629);
+  static const Color primaryNavy = Color(0xFF0B1F3B);
+  static const Color accentNavy = Color(0xFF123A6F);
 
-  // Alert States
-  static const Color success = Color(0xFF00C896);
-  static const Color warning = Color(0xFFF5A623);
-  static const Color error = Color(0xFFE94B3C);
+  // White & Neutral
+  static const Color white = Color(0xFFFFFFFF);
+  static const Color lightSurface = Color(0xFFF4F6F9);
+  static const Color divider = Color(0xFFE5E7EB);
 
-  // Confidence Badge Colors
-  static const Color confidenceHigh = Color(0xFF00C896);
-  static const Color confidenceMedium = Color(0xFF2E5BFF);
-  static const Color confidenceLow = Color(0xFFF5A623);
+  // Text Hierarchy
+  static const Color textPrimary = Color(0xFF111827);
+  static const Color textSecondary = Color(0xFF6B7280);
 
-  // Semantic Colors
-  static const Color background = deepNavy;
-  static const Color cardBackground = darkMidnight;
-  static const Color primaryText = platinumWhite;
-  static const Color secondaryText = silverGray;
-  static const Color accentActive = steelBlue;
+  // Status
+  static const Color success = Color(0xFF16A34A);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFDC2626);
 
-  // Status Colors
-  static const Color statusConnected = Color(0xFF00C896);
-  static const Color statusDisconnected = Color(0xFFE94B3C);
-  static const Color statusPaused = silverGray;
+  // Confidence Badge
+  static const Color confidenceHigh = Color(0xFF16A34A);
+  static const Color confidenceMedium = Color(0xFFF59E0B);
+  static const Color confidenceLow = Color(0xFFDC2626);
+  static const Color badgeBackground = Color(0xFFEEF2FF);
 
-  // Transparent Overlays
-  static Color get overlayLight => Colors.white.withOpacity(0.1);
-  static Color get overlayDark => Colors.black.withOpacity(0.3);
-  static Color get steelBlueTransparent => steelBlue.withOpacity(0.15);
+  // Semantic Mapping
+  static const Color background = white;
+  static const Color cardBackground = white;
+  static const Color primaryText = textPrimary;
+  static const Color secondaryText = textSecondary;
 }

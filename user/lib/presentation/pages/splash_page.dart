@@ -1,5 +1,7 @@
-// VIBRO Splash Screen
+// VIBRO Splash Page — White & Navy Enterprise
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -22,35 +24,44 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   void initState() {
     super.initState();
 
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: AppColors.primaryNavy,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ));
+
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
       vsync: this,
+      duration: const Duration(milliseconds: 1200),
     );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
 
     _controller.forward();
 
-    // Check auth state and navigate
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        _navigateToNextScreen();
-      }
+    Timer(const Duration(seconds: 3), () {
+      if (mounted) _navigateToNextScreen();
     });
   }
 
   void _navigateToNextScreen() {
-    final user = Supabase.instance.client.auth.currentUser;
+    // Reset to light status bar for rest of app
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: AppColors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ));
 
+    final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
-      // User is logged in, go to home
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomePage()),
       );
     } else {
-      // Not logged in, go to login
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const LoginPage()),
       );
@@ -66,60 +77,44 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.primaryNavy,
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // App Logo Placeholder
+              // Logo — clean, structured
               Container(
-                width: 120,
-                height: 120,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
-                  color: AppColors.steelBlue.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(
-                    color: AppColors.steelBlue,
-                    width: 2,
-                  ),
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                child: Center(
-                  child: Text(
-                    'V',
-                    style: AppTypography.pageTitle(
-                      color: AppColors.steelBlue,
-                    ).copyWith(fontSize: 64),
+                child: const Center(
+                  child: Icon(
+                    Icons.graphic_eq_rounded,
+                    size: 40,
+                    color: AppColors.white,
                   ),
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // App Name
               Text(
-                AppConstants.appName,
-                style: AppTypography.pageTitle(color: AppColors.primaryText),
+                AppConstants.appName.toUpperCase(),
+                style: AppTypography.pageTitle(color: AppColors.white).copyWith(
+                  fontSize: 26,
+                  letterSpacing: 6,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-
-              const SizedBox(height: 8),
-
-              // Tagline
+              const SizedBox(height: 6),
               Text(
-                'Precision. Intelligence. Trust.',
-                style: AppTypography.bodyMedium(color: AppColors.secondaryText),
-              ),
-
-              const SizedBox(height: 48),
-
-              // Loading Indicator
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.steelBlue),
+                'Voice Intelligence',
+                style: AppTypography.bodySmall(color: Colors.white.withOpacity(0.6)).copyWith(
+                  letterSpacing: 2,
+                  fontSize: 12,
                 ),
               ),
             ],
