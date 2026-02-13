@@ -289,6 +289,9 @@ class KwsService {
 
     // Prepare input [1, 13]
     final input = [inputFeatures]; // dimensions: [1, 13]
+    
+    // DEBUG: heavy logging to diagnose
+    print('DEBUG: MFCC Mean: $inputFeatures');
 
     // Prepare output [1, numClasses]
     final numClasses = _labels.length;
@@ -319,7 +322,13 @@ class KwsService {
 
     // Check threshold
     // DEBUG: Print all detections to see what's happening
-    print('DEBUG: Inference Result - Max Conf: ${maxConf.toStringAsFixed(4)} | Index: $maxIdx | Label: ${_labels[maxIdx]}');
+    final List<String> debugProbs = [];
+    for (int i = 0; i < numClasses; i++) {
+        debugProbs.add('${_labels[i]}: ${probs[i].toStringAsFixed(4)}');
+    }
+    print('DEBUG: Inference Result - $debugProbs');
+
+    // print('DEBUG: Inference Result - Max Conf: ${maxConf.toStringAsFixed(4)} | Index: $maxIdx | Label: ${_labels[maxIdx]}');
 
     if (maxConf >= AppConstants.defaultConfidenceThreshold) {
       final name = _labels[maxIdx] ?? 'Unknown';
