@@ -19,14 +19,20 @@ class HistoryService {
     if (_userId == null) return;
 
     try {
+      print('DEBUG: Attempting to save detection to history for "$nameLabel"');
+      
+      // Attempt Case-Insensitive Lookup first
       final names = await _client
           .from('trained_names')
           .select('id')
           .eq('user_id', _userId!)
-          .eq('name_label', nameLabel)
+          .ilike('name_label', nameLabel) // Use ILIKE for flexibility
           .maybeSingle();
 
-      if (names == null) return;
+      if (names == null) {
+         print('ERROR: Could not find "$nameLabel" in trained_names table.');
+         return;
+      }
 
       await _client.from('detection_history').insert({
         'user_id': _userId!,
@@ -36,7 +42,10 @@ class HistoryService {
         'threshold_used': AppConstants.speechRecognitionConfidenceThreshold,
         'model_version': 0, // 0 = speech-to-text
       });
-    } catch (_) {}
+      print('SUCCESS: Saved detection to history');
+    } catch (e) {
+      print('ERROR: Failed to save detection: $e');
+    }
   }
 
   /// Get detection history with name and location

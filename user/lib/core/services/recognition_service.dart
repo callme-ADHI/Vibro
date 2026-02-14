@@ -1,140 +1,285 @@
-// VIBRO — Recognition Service (speech_to_text based, from blablabala)
-// Uses device native speech recognition for name detection
-// https://github.com/callme-ADHI/blablabala
+// VIBRO – CONTINUOUS SPEECH-TO-TEXT DETECTION ALGORITHM (ASR MODE)
+// STRICT STATE CONTROLLER to prevent infinite restart loops
 import 'dart:async';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
 import '../constants/app_constants.dart';
-import 'kws_service.dart'; // Reuse DetectionEvent for compatibility
+import 'kws_service.dart'; // Import to reuse DetectionEvent
 
-/// Real-time name recognition using device speech-to-text.
-/// Replaces TFLite-based KWS with native speech recognition.
+enum RecognitionState {
+  IDLE,
+  INITIALIZING,
+  LISTENING,
+  PROCESSING,
+  RESTARTING,
+  ERROR
+}
+
 class RecognitionService {
   RecognitionService._();
   static final RecognitionService instance = RecognitionService._();
 
-  final stt.SpeechToText _speech = stt.SpeechToText();
+  final SpeechToText _speech = SpeechToText();
+  
+  // State Management
+  final StreamController<RecognitionState> _stateController = StreamController.broadcast();
+  Stream<RecognitionState> get stateStream => _stateController.stream;
+  
+  // Detection Stream
+  final StreamController<DetectionEvent> _detectionController = StreamController.broadcast();
+  Stream<DetectionEvent> get detectionStream => _detectionController.stream;
+
+  // 🎛 STATE VARIABLES
+  bool _isInitialized = false;
   bool _isListening = false;
-  StreamController<DetectionEvent>? _detectionController;
-
+  bool _shouldListen = false; // User intent
+  bool _isRestarting = false; // Preventing overlap
+  int _restartAttempts = 0;
+  
   Set<String> _activeNames = {};
-  DateTime? _lastDetection;
-  String? _lastDetectedName;
-  Timer? _restartTimer;
+  DateTime? _lastTriggerTime;
+  
+  // CONSTANTS
+  static const int _maxRestartAttempts = 5;
+  static const Duration _cooldownDuration = Duration(seconds: 2); // 2s CRITICAL
+  static const Duration _listenDuration = Duration(seconds: 25);
+  static const Duration _pauseDuration = Duration(seconds: 3);
+  static const Duration _debounceTime = Duration(seconds: 3);
 
-  bool get isListening => _isListening;
-  Set<String> get activeNames => Set.unmodifiable(_activeNames);
-
-  /// Initialize for listening. Names to detect (e.g. from trained_names).
+  // 1️⃣ INITIALIZATION
   Future<bool> initialize(Set<String> names) async {
-    if (names.isEmpty) return false;
+    _updateState(RecognitionState.INITIALIZING);
+    _activeNames = names.map((e) => e.toLowerCase()).toSet();
 
-    final available = await _speech.initialize(
-      onError: (error) => print('Speech error: $error'),
-      onStatus: (status) {
-        if (status == 'notListening' && _isListening) {
-          _scheduleRestart();
-        }
-      },
-    );
-
-    if (!available) {
-      print('Speech recognition not available on this device');
-      return false;
+    if (_isInitialized) {
+      _updateState(RecognitionState.IDLE);
+      return true;
     }
 
-    _activeNames = names.toSet();
-    return true;
+    try {
+      _isInitialized = await _speech.initialize(
+        onError: _handleError,
+        onStatus: _handleStatus,
+        debugLogging: true, // Helpful for debugging
+      );
+
+      if (!_isInitialized) {
+        print("ASR Initialization failed");
+        _updateState(RecognitionState.ERROR);
+        return false;
+      }
+      
+      print("ASR Initialized");
+      _updateState(RecognitionState.IDLE);
+      return true;
+    } catch (e) {
+      print('ERROR: Speech Init Failed: $e');
+      _updateState(RecognitionState.ERROR);
+      return false;
+    }
   }
 
-  /// Start continuous listening. Returns stream of detection events.
-  Stream<DetectionEvent> startListening() {
-    _detectionController?.close();
-    _detectionController = StreamController<DetectionEvent>.broadcast();
+  // 2️⃣ START LISTENING (Controlled Entry)
+  void startListening() {
+    print('DEBUG: User requested START listening');
+    
+    // Validate State
+    if (!_isInitialized) {
+      print('DEBUG: Not initialized, aborting start');
+      return;
+    }
+    
+    // Indicate user intent
+    _shouldListen = true;
+    _restartAttempts = 0;
+    
+    // Check flags
+    if (_isListening) {
+      print('DEBUG: Already listening, ignoring start request');
+      return;
+    }
+    if (_isRestarting) {
+      print('DEBUG: Restart in progress, ignoring start request');
+      return;
+    }
+
+    _startSession();
+  }
+
+  // 🎙 INTERNAL SESSION START
+  Future<void> _startSession() async {
+    // Double check user intent
+    if (!_shouldListen) {
+      _updateState(RecognitionState.IDLE);
+      return;
+    }
+    
+    // Check engine state
+    if (_speech.isListening) {
+       print('DEBUG: Engine is active, marking as listening');
+       _isListening = true;
+       _updateState(RecognitionState.LISTENING);
+       return;
+    }
+
+    _updateState(RecognitionState.LISTENING);
     _isListening = true;
-    _startContinuousListening();
-    return _detectionController!.stream;
+
+    try {
+      print('DEBUG: Calling speech.listen()...');
+      await _speech.listen(
+        onResult: _handleResult,
+        listenFor: _listenDuration,
+        pauseFor: _pauseDuration,
+        partialResults: true,
+        listenMode: ListenMode.confirmation,
+        cancelOnError: true, // We catch in onError
+      );
+    } catch (e) {
+      print('ERROR: startSession exception: $e');
+      _isListening = false;
+      _scheduleRestart(isError: true);
+    }
   }
 
-  /// Stop listening
-  void stopListening() {
-    _isListening = false;
-    _restartTimer?.cancel();
-    _speech.stop();
-    _detectionController?.close();
-    _detectionController = null;
+  // 3️⃣ HANDLE RESULTS
+  void _handleResult(SpeechRecognitionResult result) {
+    _restartAttempts = 0; // Reset failures on success
+    _updateState(RecognitionState.PROCESSING);
+
+    final text = result.recognizedWords.toLowerCase();
+    
+    // Check for names
+    for (final name in _activeNames) {
+      if (text.contains(name)) {
+        double confidence = result.confidence;
+        // Fix: Android often returns -1.0 or 0.0, use default high if matched
+        if (confidence <= 0.0) confidence = 0.85; 
+        
+        _triggerDetection(name, confidence);
+      }
+    }
+    
+    // If not final, we are still listening
+    if (!result.finalResult) {
+       _updateState(RecognitionState.LISTENING);
+    }
   }
 
-  Future<void> _startContinuousListening() async {
-    if (!_isListening) return;
+  // 🔒 DEBOUNCE & TRIGGER
+  void _triggerDetection(String name, double confidence) {
+    final now = DateTime.now();
+    if (_lastTriggerTime != null) {
+      if (now.difference(_lastTriggerTime!) < _debounceTime) {
+        return; // Debounced
+      }
+    }
 
-    await _speech.listen(
-      onResult: (result) {
-        if (result.finalResult) {
-          _processTranscription(result.recognizedWords, result.confidence);
-        }
-      },
-      listenFor: const Duration(seconds: 100),
-      pauseFor: const Duration(seconds: 3),
-      partialResults: false,
-      cancelOnError: false,
-      listenMode: stt.ListenMode.confirmation,
-    );
-
-    _scheduleRestart();
+    _lastTriggerTime = now;
+    // Log clearly with sanitized confidence
+    print('VICTORY: Detected "$name" ($confidence)');
+    
+    _detectionController.add(DetectionEvent(
+      name: name,
+      confidence: confidence,
+      timestamp: now,
+    ));
   }
 
-  void _scheduleRestart() {
-    _restartTimer?.cancel();
-    if (!_isListening) return;
+  // 4️⃣ STATUS HANDLER
+  void _handleStatus(String status) {
+    print('DEBUG: Speech Status: $status');
+    
+    if (status == 'done' || status == 'notListening') {
+      _isListening = false; // Mark engine as stopped
+      
+      // If we intended to listen, schedule a restart
+      if (_shouldListen) {
+        _scheduleRestart();
+      } else {
+        _updateState(RecognitionState.IDLE);
+      }
+    } else if (status == 'listening') {
+      _isListening = true;
+      _updateState(RecognitionState.LISTENING);
+    }
+  }
 
-    _restartTimer = Timer(const Duration(seconds: 3), () async {
-      if (_isListening) {
-        await _speech.stop();
-        await Future.delayed(const Duration(milliseconds: 500));
-        _startContinuousListening();
+  // 5️⃣ ERROR HANDLER (CRITICAL FIX)
+  void _handleError(SpeechRecognitionError error) {
+    print('DEBUG: Speech Error: ${error.errorMsg} (permanent: ${error.permanent})');
+    _isListening = false; // Error implies stopping
+
+    if (!_shouldListen) return;
+
+    // Handle Timeouts (Silence) as normal cycle
+    if (error.errorMsg == 'error_speech_timeout' || error.errorMsg == 'error_no_match') {
+       _scheduleRestart();
+       return;
+    }
+    
+    // Genuine errors (busy, client, etc.)
+    _updateState(RecognitionState.ERROR);
+    
+    if (error.permanent) {
+      _restartAttempts++;
+      if (_restartAttempts > _maxRestartAttempts) {
+        print('CRITICAL: Max restart attempts reached. Stopping ASR.');
+        stopListening();
+        return;
+      }
+    }
+    
+    _scheduleRestart(isError: true);
+  }
+
+  // 🔄 SAFE RESTART LOGIC
+  void _scheduleRestart({bool isError = false}) {
+    if (_isRestarting) return; // Prevent double restart scheduling
+    
+    _isRestarting = true;
+    _updateState(RecognitionState.RESTARTING);
+    
+    final delay = isError ? Duration(seconds: 3) : _cooldownDuration;
+    
+    print('DEBUG: Scheduling restart in ${delay.inMilliseconds}ms...');
+    
+    // Timer to release restart lock
+    Timer(delay, () async {
+      _isRestarting = false;
+      
+      // Only restart if still desired
+      if (_shouldListen && !_isListening) {
+        _startSession();
+      } else if (!_shouldListen) {
+        _updateState(RecognitionState.IDLE);
       }
     });
   }
 
-  void _processTranscription(String transcript, double confidence) {
-    if (transcript.isEmpty) return;
-
-    final transcriptLower = transcript.toLowerCase();
-
-    for (final name in _activeNames) {
-      final nameLower = name.toLowerCase();
-      if (!transcriptLower.contains(nameLower)) continue;
-
-      final meetsThreshold =
-          confidence >= AppConstants.speechRecognitionConfidenceThreshold;
-      if (!meetsThreshold) continue;
-
-      _handleDetection(name, confidence);
-      return; // One detection per transcript
+  // ⛔ STOP LISTENING (Safe Exit)
+  void stopListening() {
+    print('DEBUG: Stopping ASR');
+    _shouldListen = false;
+    _restartAttempts = 0;
+    
+    if (_isListening) {
+      _speech.stop();
     }
+    _isListening = false;
+    _updateState(RecognitionState.IDLE);
   }
 
-  void _handleDetection(String name, double confidence) {
-    if (_lastDetection != null && _lastDetectedName == name) {
-      final elapsed = DateTime.now().difference(_lastDetection!);
-      if (elapsed.inSeconds < AppConstants.detectionCooldownSeconds) {
-        return;
-      }
+  void _updateState(RecognitionState newState) {
+    if (!_stateController.isClosed) {
+      _stateController.add(newState);
     }
-
-    _lastDetection = DateTime.now();
-    _lastDetectedName = name;
-
-    final event = DetectionEvent(
-      name: name,
-      confidence: confidence,
-      timestamp: DateTime.now(),
-    );
-    _detectionController?.add(event);
   }
 
   void dispose() {
-    _restartTimer?.cancel();
     stopListening();
+    _stateController.close();
+    _detectionController.close();
   }
 }

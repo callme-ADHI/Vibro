@@ -10,6 +10,7 @@ import '../../core/services/name_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/history_service.dart';
 import '../../core/services/kws_service.dart'; // DetectionEvent
+import '../../core/services/ble_service.dart'; // BLE Integration
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'locations_page.dart';
@@ -26,10 +27,22 @@ class _ListeningPageState extends State<ListeningPage>
   final RecognitionService _recognition = RecognitionService.instance;
   final NameService _nameService = NameService.instance;
   final LocationService _locationService = LocationService.instance;
-  bool _isListening = false;
+  final BleService _bleService = BleService.instance;
+  
+  // State from Service
+  RecognitionState _recState = RecognitionState.IDLE;
+  bool get _isListening => _recState == RecognitionState.LISTENING || 
+                          _recState == RecognitionState.PROCESSING || 
+                          _recState == RecognitionState.RESTARTING;
+
   bool _isReady = false;
   bool _isLoading = true;
+  bool _isBleConnected = false;
+  
   StreamSubscription<DetectionEvent>? _detectionSub;
+  StreamSubscription<RecognitionState>? _stateSub;
+  StreamSubscription<bool>? _bleSub;
+  
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
   final Set<String> _selectedNames = {};
@@ -56,6 +69,42 @@ class _ListeningPageState extends State<ListeningPage>
 
     _initNotifications();
     _loadNamesAndInit();
+    
+    // BLE Init
+    _bleService.initialize();
+    _bleSub = _bleService.connectionStream.listen((connected) {
+      if (mounted) setState(() => _isBleConnected = connected);
+    });
+    
+    // Subscribe to Service Streams
+    _stateSub = _recognition.stateStream.listen((state) {
+      if (!mounted) return;
+      setState(() => _recState = state);
+      
+      if (_isListening) {
+        if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+      } else {
+        _pulseCtrl.stop();
+        _pulseCtrl.reset();
+      }
+    });
+
+    _detectionSub = _recognition.detectionStream.listen((event) {
+      if (!mounted) return;
+      
+      setState(() {
+        _detections.insert(0, event);
+        if (_detections.length > 50) _detections.removeLast();
+      });
+
+      // Feedback & History
+      _triggerFeedback(event);
+      HistoryService.instance.insertDetection(
+          nameLabel: event.name,
+          confidence: event.confidence,
+          locationId: _selectedLocationId == _allNamesId ? null : _selectedLocationId,
+      );
+    });
   }
 
   Future<void> _loadNamesAndInit() async {
@@ -97,6 +146,9 @@ class _ListeningPageState extends State<ListeningPage>
 
   Future<void> _onLocationChanged(String? locationId) async {
     if (_selectedLocationId == locationId) return;
+    // Stop listening if location changes
+    if (_isListening) _stopListening();
+    
     setState(() => _selectedLocationId = locationId);
     await _loadNamesAndInit();
   }
@@ -106,7 +158,6 @@ class _ListeningPageState extends State<ListeningPage>
     const settings = InitializationSettings(android: android);
     await _notifications.initialize(settings);
 
-    // Request permission for Android 13+
     final platform = _notifications.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await platform?.requestNotificationsPermission();
@@ -123,8 +174,8 @@ class _ListeningPageState extends State<ListeningPage>
   }
 
   void _startListening() async {
-    final initialized =
-        await _recognition.initialize(_selectedNames);
+    // 1. Initialize with current names
+    final initialized = await _recognition.initialize(_selectedNames);
     if (!initialized) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -134,39 +185,28 @@ class _ListeningPageState extends State<ListeningPage>
       return;
     }
 
-    final stream = _recognition.startListening();
-    _detectionSub = stream.listen((event) {
-      if (!mounted) return;
-      setState(() {
-        _detections.insert(0, event);
-        if (_detections.length > 50) _detections.removeLast();
-      });
-
-      // Feedback when name is selected (speech_to_text uses 60% threshold)
-      if (_selectedNames.contains(event.name)) {
-        _triggerFeedback(event);
-        // Save to history (location is null if "All names")
-        HistoryService.instance.insertDetection(
-          nameLabel: event.name,
-          confidence: event.confidence,
-          locationId: _selectedLocationId == _allNamesId ? null : _selectedLocationId,
-        );
-      }
-    });
-
-    _pulseCtrl.repeat(reverse: true);
-    setState(() => _isListening = true);
+    // 2. Start
+    _recognition.startListening();
   }
 
+  void _stopListening() {
+    _recognition.stopListening();
+  }
+  
   Future<void> _triggerFeedback(DetectionEvent event) async {
-    // 1. Haptic Feedback
+    // 1. Phone Vibration
     if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 500); // 500ms vibration
+      Vibration.vibrate(duration: 500);
     } else {
       HapticFeedback.heavyImpact();
     }
+    
+    // 2. Hardware LED (BLE)
+    if (_isBleConnected) {
+       _bleService.blinkLed();
+    }
 
-    // 2. Notification
+    // 3. Notification
     const androidDetails = AndroidNotificationDetails(
       'vibro_detections',
       'Detections',
@@ -178,40 +218,32 @@ class _ListeningPageState extends State<ListeningPage>
 
     await _notifications.show(
       0,
-      'Name Detected!',
-      'Heard "${event.name}" with ${(event.confidence * 100).toStringAsFixed(0)}% confidence',
+      'Name Detected',
+      'Heard "${event.name}" (${(event.confidence * 100).toInt()}%)',
       details,
     );
 
-    // 3. In-App SnackBar
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Detected: ${event.name} (${(event.confidence * 100).toStringAsFixed(0)}%)',
+            'Detected: ${event.name} (${(event.confidence * 100).toInt()}%)',
             style: AppTypography.bodyMedium(color: AppColors.white),
           ),
           backgroundColor: AppColors.success,
           duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
         ),
       );
     }
   }
 
-  void _stopListening() {
-    _recognition.stopListening();
-    _detectionSub?.cancel();
-    _detectionSub = null;
-    _pulseCtrl.stop();
-    _pulseCtrl.reset();
-    setState(() => _isListening = false);
-  }
-
   @override
   void dispose() {
     _stopListening();
+    _detectionSub?.cancel();
+    _stateSub?.cancel();
+    _bleSub?.cancel();
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -231,6 +263,23 @@ class _ListeningPageState extends State<ListeningPage>
               .copyWith(fontSize: 22),
         ),
         actions: [
+          // BLE STATUS ICON
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: _isBleConnected ? AppColors.accentNavy.withValues(alpha: 0.1) : Colors.transparent,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _isBleConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+                size: 20,
+                color: _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary.withValues(alpha: 0.3),
+              ),
+            ),
+          ),
+          
           if (_isListening)
             Container(
               margin: const EdgeInsets.only(right: 16),
@@ -539,15 +588,43 @@ class _ListeningPageState extends State<ListeningPage>
   String get _statusText {
     if (_isLoading) return 'Loading...';
     if (!_isReady) return 'Add Names First';
-    if (_isListening) return 'Listening...';
-    return 'Ready';
+    
+    switch (_recState) {
+      case RecognitionState.INITIALIZING:
+        return 'Preparing mic...';
+      case RecognitionState.LISTENING:
+        return 'Listening...';
+      case RecognitionState.PROCESSING:
+        return 'Processing...';
+      case RecognitionState.RESTARTING:
+        return 'Reconnecting...';
+      case RecognitionState.ERROR:
+        return 'Mic Error';
+      case RecognitionState.IDLE:
+      default:
+        return 'Ready';
+    }
   }
 
   String get _subtitleText {
     if (_isLoading) return 'Please wait';
     if (!_isReady) return 'Add names to detect';
-    if (_isListening) return 'Speech recognition active (100s on / 3s off)';
-    return 'Tap to start listening';
+    
+    switch (_recState) {
+      case RecognitionState.INITIALIZING:
+        return 'Starting speech engine';
+      case RecognitionState.LISTENING:
+        return 'Say a name to detect';
+      case RecognitionState.PROCESSING:
+        return 'Analyzing speech...';
+      case RecognitionState.RESTARTING:
+        return 'Refreshing session (auto)';
+      case RecognitionState.ERROR:
+        return 'Tap to retry';
+      case RecognitionState.IDLE:
+      default:
+        return 'Tap to start listening';
+    }
   }
 
   // ═══════════════════════════════════════════
@@ -569,7 +646,7 @@ class _ListeningPageState extends State<ListeningPage>
             'Engine',
             _isLoading
                 ? 'Loading...'
-                : (_isReady ? 'Speech-to-Text ✓' : 'Not ready'),
+                : (_isReady ? 'Speech-to-Text (ASR)' : 'Not ready'),
             _isReady ? AppColors.success : AppColors.error,
           ),
           const Divider(color: AppColors.divider, height: 20),
@@ -583,7 +660,7 @@ class _ListeningPageState extends State<ListeningPage>
           const Divider(color: AppColors.divider, height: 20),
           _buildInfoRow(
             'Status',
-            _isListening ? 'Active' : 'Idle',
+            _recState.name, // "LISTENING", "IDLE", etc.
             _isListening ? AppColors.success : AppColors.textSecondary,
           ),
         ],
@@ -628,24 +705,26 @@ class _ListeningPageState extends State<ListeningPage>
 
   Widget _buildEmptyLog() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            _isListening
-                ? Icons.hearing_rounded
-                : Icons.format_list_bulleted_rounded,
-            size: 40,
-            color: AppColors.textSecondary.withValues(alpha: 0.4),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _isListening
-                ? 'Waiting for a voice match...'
-                : 'Detections will appear here',
-            style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _isListening
+                  ? Icons.hearing_rounded
+                  : Icons.format_list_bulleted_rounded,
+              size: 40,
+              color: AppColors.textSecondary.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _isListening
+                  ? 'Waiting for a voice match...'
+                  : 'Detections will appear here',
+              style: AppTypography.bodyMedium(color: AppColors.textSecondary),
+            ),
+          ],
+        ),
       ),
     );
   }
