@@ -41,7 +41,8 @@ class _ListeningPageState extends State<ListeningPage>
   
   StreamSubscription<DetectionEvent>? _detectionSub;
   StreamSubscription<RecognitionState>? _stateSub;
-  StreamSubscription<bool>? _bleSub;
+  StreamSubscription? _bleSub;
+  Timer? _refreshTimer;
   
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
@@ -70,11 +71,26 @@ class _ListeningPageState extends State<ListeningPage>
     _initNotifications();
     _loadNamesAndInit();
     
+    // Auto-refresh every 5s
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
+
     // BLE Init
     _bleService.initialize();
-    _bleSub = _bleService.connectionStream.listen((connected) {
-      if (mounted) setState(() => _isBleConnected = connected);
+    _bleSub = _bleService.statusStream.listen((status) {
+      if (!mounted) return;
+      setState(() => _isBleConnected = status == BleStatus.connected);
+      
+      if (status == BleStatus.connected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vibro Device Connected'),
+            backgroundColor: AppColors.success,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     });
+    _isBleConnected = _bleService.isConnected; // Initial check
     
     // Subscribe to Service Streams
     _stateSub = _recognition.stateStream.listen((state) {
@@ -107,42 +123,60 @@ class _ListeningPageState extends State<ListeningPage>
     });
   }
 
-  Future<void> _loadNamesAndInit() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadNamesAndInit({bool silent = false}) async {
+    if (!silent) setState(() => _isLoading = true);
     try {
       final locations = await _locationService.getLocations();
-      List<String> names;
+      List<String> namesData;
+
       if (_selectedLocationId == null || _selectedLocationId == _allNamesId) {
-        final namesData = await _nameService.getNames();
-        names = namesData
+        final rawNames = await _nameService.getNames();
+        namesData = rawNames
             .map((n) => (n['name_label'] as String?) ?? '')
             .where((s) => s.isNotEmpty)
             .toList();
       } else {
-        names = await _locationService.getNameLabelsForLocation(_selectedLocationId!);
+        namesData = await _locationService.getNameLabelsForLocation(_selectedLocationId!);
       }
+
       if (mounted) {
         setState(() {
           _locations = locations;
-          _availableNames = names;
-          _selectedNames.clear();
-          _selectedNames.addAll(names);
-          _isReady = names.isNotEmpty;
-          _isLoading = false;
+          _availableNames = namesData;
+          
+          // Re-validate selection against available names
+          final validSelection = _selectedNames.where((n) => _availableNames.contains(n)).toSet();
+          if (validSelection.length != _selectedNames.length) {
+             _selectedNames.clear();
+             _selectedNames.addAll(validSelection);
+          }
+          
+          // Auto-select if empty and names exist (optional, maybe keep user choice)
+          if (_selectedNames.isEmpty && _availableNames.isNotEmpty) {
+             _selectedNames.addAll(_availableNames);
+          }
+          
+          _isReady = _availableNames.isNotEmpty;
+          if (!silent) _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _locations = [];
           _availableNames = [];
-          _selectedNames.clear();
+          
+          // Don't clear selection on error to avoid jitter, but maybe mark as error state?
           _isReady = false;
-          _isLoading = false;
+          if (!silent) _isLoading = false;
         });
       }
     }
   }
+
+// ... 
+
+
 
   Future<void> _onLocationChanged(String? locationId) async {
     if (_selectedLocationId == locationId) return;
@@ -240,6 +274,7 @@ class _ListeningPageState extends State<ListeningPage>
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _stopListening();
     _detectionSub?.cancel();
     _stateSub?.cancel();
@@ -265,20 +300,30 @@ class _ListeningPageState extends State<ListeningPage>
         actions: [
           // BLE STATUS ICON
           Center(
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: _isBleConnected ? AppColors.accentNavy.withValues(alpha: 0.1) : Colors.transparent,
-                shape: BoxShape.circle,
+              child: IconButton(
+                icon: Icon(
+                  _isBleConnected ? Icons.bluetooth_connected : Icons.bluetooth_searching,
+                  size: 20,
+                  color: _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary.withValues(alpha: 0.5),
+                ),
+                tooltip: _isBleConnected ? "Connected" : "Tap to Connect",
+                onPressed: _isBleConnected 
+                    ? null 
+                    : () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Scanning for Vibro...')),
+                        );
+                        _bleService.startConnectionProcess();
+                      },
               ),
-              child: Icon(
-                _isBleConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
-                size: 20,
-                color: _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary.withValues(alpha: 0.3),
-              ),
-            ),
           ),
+          
+          if (_isBleConnected)
+            IconButton(
+              icon: const Icon(Icons.touch_app_outlined, color: AppColors.accentNavy),
+              tooltip: "Test Device",
+              onPressed: () => _bleService.blinkLed(),
+            ),
           
           if (_isListening)
             Container(
@@ -646,7 +691,7 @@ class _ListeningPageState extends State<ListeningPage>
             'Engine',
             _isLoading
                 ? 'Loading...'
-                : (_isReady ? 'Speech-to-Text (ASR)' : 'Not ready'),
+                : (_isReady ? 'Active' : 'No names'),
             _isReady ? AppColors.success : AppColors.error,
           ),
           const Divider(color: AppColors.divider, height: 20),
@@ -737,8 +782,16 @@ class _ListeningPageState extends State<ListeningPage>
       itemBuilder: (_, index) {
         final det = _detections[index];
         final confidence = (det.confidence * 100).toStringAsFixed(1);
-        final time =
-            '${det.timestamp.hour.toString().padLeft(2, '0')}:${det.timestamp.minute.toString().padLeft(2, '0')}:${det.timestamp.second.toString().padLeft(2, '0')}';
+        
+        // Format: "Mon, 10:30:45 AM"
+        final weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        final day = weekDays[det.timestamp.weekday - 1];
+        final hour = det.timestamp.hour > 12 ? det.timestamp.hour - 12 : (det.timestamp.hour == 0 ? 12 : det.timestamp.hour);
+        final minute = det.timestamp.minute.toString().padLeft(2, '0');
+        final second = det.timestamp.second.toString().padLeft(2, '0');
+        final ampm = det.timestamp.hour >= 12 ? 'PM' : 'AM';
+        
+        final time = '$day, $hour:$minute:$second $ampm';
 
         final isNew = index == 0 &&
             DateTime.now().difference(det.timestamp).inSeconds < 3;

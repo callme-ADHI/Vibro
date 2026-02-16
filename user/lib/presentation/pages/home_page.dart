@@ -1,10 +1,12 @@
 // VIBRO Home Page — White & Navy Enterprise (Tab Content)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
 import '../../core/services/location_service.dart';
+import '../../core/services/ble_service.dart';
 import 'training_status_page.dart';
 import 'locations_page.dart';
 
@@ -22,33 +24,53 @@ class _HomePageState extends State<HomePage> {
   int _trainingProgress = 0;
   int _modelCount = 0;
   int _locationCount = 0;
+  int _detectionCount = 0; // Added detection count
+  bool _isBleConnected = false; 
+
+  Timer? _refreshTimer;
+  StreamSubscription? _bleSub;
 
   @override
   void initState() {
     super.initState();
+    _loadAllData();
+    
+    // Auto refresh every 5s
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadAllData());
+
+    // BLE Status
+    _bleSub = BleService.instance.connectionStream.listen((connected) {
+       if (mounted) setState(() => _isBleConnected = connected);
+    });
+    _isBleConnected = BleService.instance.isConnected; // Initial check
+  }
+  
+  void _loadAllData() {
     _loadUserProfile();
     _loadTrainingStatus();
     _loadLocationCount();
+    _loadDetectionCount();
   }
 
   Future<void> _loadUserProfile() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        setState(() {
-          _userEmail = user.email ?? '';
-        });
+        if (_userEmail != user.email) setState(() => _userEmail = user.email ?? '');
 
-        final response = await Supabase.instance.client
-            .from('profiles')
-            .select('username')
-            .eq('id', user.id)
-            .maybeSingle();
+        // Only fetch profile if username is default
+        if (_userName == 'User') {
+             final response = await Supabase.instance.client
+                .from('profiles')
+                .select('username')
+                .eq('id', user.id)
+                .maybeSingle();
 
-        if (mounted && response != null && response['username'] != null) {
-          setState(() {
-            _userName = response['username'];
-          });
+            if (mounted && response != null && response['username'] != null) {
+              setState(() {
+                _userName = response['username'];
+              });
+            }
         }
       }
     } catch (_) {}
@@ -57,32 +79,59 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadTrainingStatus() async {
     final status = await TrainingService.instance.getCurrentStatus();
     if (mounted && status != null) {
-      setState(() {
-        _trainingStatus = status.status;
-        _trainingProgress = status.progressPercentage;
-      });
+      if (_trainingStatus != status.status || _trainingProgress != status.progressPercentage) {
+          setState(() {
+            _trainingStatus = status.status;
+            _trainingProgress = status.progressPercentage;
+          });
+      }
     }
 
-    // Load trained models count
+    // Load trained models count (names)
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        final models = await Supabase.instance.client
-            .from('trained_models')
-            .select('id')
-            .eq('user_id', user.id);
-        if (mounted) {
-          setState(() => _modelCount = (models as List).length);
+        final count = await Supabase.instance.client
+            .from('trained_names')
+            .count(CountOption.exact)
+            .eq('user_id', user.id); 
+        
+        if (mounted && _modelCount != count) {
+          setState(() => _modelCount = count);
         }
       }
     } catch (_) {}
+  }
+  
+  Future<void> _loadDetectionCount() async {
+      try {
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user != null) {
+               // Get count of detections
+               final count = await Supabase.instance.client
+                .from('detection_history')
+                .count(CountOption.exact)
+                .eq('user_id', user.id);
+               
+               if (mounted && _detectionCount != count) {
+                   setState(() => _detectionCount = count);
+               }
+          }
+      } catch (_) {}
   }
 
   Future<void> _loadLocationCount() async {
     try {
       final locs = await LocationService.instance.getLocations();
-      if (mounted) setState(() => _locationCount = locs.length);
+      if (mounted && _locationCount != locs.length) setState(() => _locationCount = locs.length);
     } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _bleSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -190,14 +239,14 @@ class _HomePageState extends State<HomePage> {
                 _buildFeatureCard(
                   icon: Icons.record_voice_over_rounded,
                   title: 'Voice Models',
-                  subtitle: '$_modelCount trained',
+                  subtitle: '$_modelCount active',
                   statusColor: _modelCount > 0 ? AppColors.success : AppColors.accentNavy,
                 ),
                 _buildFeatureCard(
-                  icon: Icons.search_rounded,
+                  icon: Icons.history_rounded,
                   title: 'Detections',
-                  subtitle: 'No activity',
-                  statusColor: AppColors.textSecondary,
+                  subtitle: '$_detectionCount total',
+                  statusColor: _detectionCount > 0 ? AppColors.success : AppColors.textSecondary,
                 ),
                 GestureDetector(
                   onTap: () async {
@@ -216,8 +265,8 @@ class _HomePageState extends State<HomePage> {
                 _buildFeatureCard(
                   icon: Icons.developer_board_rounded,
                   title: 'Device',
-                  subtitle: 'Not connected',
-                  statusColor: AppColors.warning,
+                  subtitle: _isBleConnected ? 'Connected' : 'Not Connected',
+                  statusColor: _isBleConnected ? AppColors.success : AppColors.error,
                 ),
               ],
             ),
@@ -230,9 +279,17 @@ class _HomePageState extends State<HomePage> {
             _buildCard(
               child: Column(
                 children: [
-                  _buildStatusRow('ESP32 Device', 'Not Connected', AppColors.error),
+                  _buildStatusRow(
+                      'ESP32 Device', 
+                      _isBleConnected ? 'Online' : 'Offline', 
+                      _isBleConnected ? AppColors.success : AppColors.error
+                  ),
                   const Divider(color: AppColors.divider, height: 1),
-                  _buildStatusRow('Detection', 'Idle', AppColors.textSecondary),
+                  _buildStatusRow(
+                      'Detection', 
+                      'Ready', 
+                      AppColors.success
+                  ),
                   const Divider(color: AppColors.divider, height: 1),
                   _buildStatusRow('Cloud Sync', 'Active', AppColors.success),
                 ],

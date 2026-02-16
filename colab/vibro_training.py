@@ -30,7 +30,7 @@ print(f"GPU: {tf.config.list_physical_devices('GPU')}")
 # ═══════════════════════════════════════════════════
 # Set SUPABASE_SERVICE_KEY in Colab: Runtime → Secrets, or env vars (takes precedence)
 SUPABASE_URL = "https://pqtjvdfcitdpveuqzgpk.supabase.co"
-SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "YOUR_SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "INSERT_YOUR_SERVICE_ROLE_KEY_HERE")
 
 if not SUPABASE_SERVICE_KEY:
     raise ValueError("Set SUPABASE_SERVICE_KEY env or in Colab secrets. Do not commit real keys.")

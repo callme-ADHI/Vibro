@@ -4,9 +4,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'tflite_interpreter.dart'; // OUR WRAPPER
 import '../constants/app_constants.dart';
 import 'mfcc_extractor.dart';
 
@@ -29,7 +30,7 @@ class KwsService {
   static final instance = KwsService._();
 
   // ── State ──
-  Interpreter? _interpreter;
+  TfliteInterpreterWrapper? _interpreter;
   Map<int, String> _labels = {};
   bool _modelLoaded = false;
   bool _isListening = false;
@@ -75,6 +76,12 @@ class KwsService {
   /// Load TFLite model + labels from local storage.
   /// Returns true if model loaded successfully.
   Future<bool> loadModel() async {
+    if (kIsWeb) {
+      print('DEBUG: KWS - Web platform detected. Model loading skipped.');
+      _modelLoaded = false;
+      return false;
+    }
+
     try {
       final dir = await getApplicationDocumentsDirectory();
       final modelDir = Directory('${dir.path}/vibro_models');
@@ -111,7 +118,8 @@ class KwsService {
 
       // Load TFLite interpreter
       _interpreter?.close();
-      _interpreter = Interpreter.fromFile(File(modelPath));
+      _interpreter = getInterpreterWrapper();
+      await _interpreter!.loadFromFile(modelPath);
 
       // Load labels
       _labels = {};
@@ -127,8 +135,8 @@ class KwsService {
       print('DEBUG: KWS - Labels: $_labels');
       
       // Validate Input Shape
-      final inputShape = _interpreter!.getInputTensor(0).shape;
-      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      final inputShape = _interpreter!.getInputShape(0);
+      final outputShape = _interpreter!.getOutputShape(0);
       print('DEBUG: KWS - Model Input Shape: $inputShape');
       print('DEBUG: KWS - Model Output Shape: $outputShape');
 
