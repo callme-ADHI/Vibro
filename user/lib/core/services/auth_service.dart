@@ -59,7 +59,7 @@ class AuthService {
     if (user == null) throw Exception('Not authenticated');
 
     await _client.from('profiles').update({
-      'username': username,
+      'full_name': username,
     }).eq('id', user.id);
   }
 

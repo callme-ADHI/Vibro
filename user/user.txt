@@ -1,0 +1,82 @@
+======================================
+VIBRO_v6 : USER APP DOCUMENTATION
+======================================
+
+1. OVERVIEW & ARCHITECTURE
+--------------------------------------
+The Vibro User App (built in Flutter & Riverpod) is the primary mobile interface for "Deaf Users". It controls the connection between the smartphone, the Cloud Backend (Supabase), and the Vibro ESP32 Hardware (via Bluetooth Low Energy / BLE).
+
+App Theme / UI Design:
+- Primary Colours: White background (#FFFFFF) with Navy Blue accents (#0A192F).
+- Style: Minimal, professional, government/enterprise-grade, and highly accessible.
+- Elements: Large typography, high-contrast borders, rounded cards (14px-16px radius), and prominent action buttons (e.g., "Continue", "Log In", "Save").
+
+2. AUTHENTICATION FLOW
+--------------------------------------
+Location: `lib/features/auth/screens/login_screen.dart`
+The authentication flow utilizes Supabase to manage user access securely.
+Features:
+- "Log In" / "Sign Up" Toggle logic.
+- "Sign Up" Mode captures: Full Name, Email, Password, Date of Birth (Calendar UI), and User Role.
+- User Role Dropdown: Deaf User (active) vs. Connected User (coming soon).
+- "Log In" Mode simplifies the form to capture only Email & Password.
+- Backend synchronization ensures `full_name` is explicitly saved to the `profiles` table upon successful registration, ignoring `dob` and `user_type` when simply logging in.
+- UI pushes the user to `MainShell()` upon successful authentication.
+
+3. MAIN SHELL & BOTTOM NAVIGATION BAR
+--------------------------------------
+Location: `lib/presentation/pages/main_shell.dart`
+Once authenticated, the app enters the MainShell wrapper. This screen hosts a persistent Bottom Navigation Bar that manages the main 5 tabs of the application:
+1. Home
+2. Names/Models
+3. Listening / Real-Time
+4. History
+5. Settings
+
+4. TAB 1: HOME DASHBOARD (`home_page.dart`)
+--------------------------------------
+The central command center.
+- Welcome Header: Displays user's initial and explicitly fetched `full_name`.
+- 4x Feature Grid:
+  - Voice Models: Shows number of currently trained models.
+  - Detections: Shows total real-time matched sounds.
+  - Locations: Shows total geographic pinpoints mapped for contextual feedback.
+  - Device: Shows BLE Connection status ("Online" / "Offline") in real-time.
+- System Status: Live indicators for ESP32, Detection engine, and Cloud Sync.
+- Model Training Card: Dynamic UI element tracking ML pipeline status (Uploading, Downloading, Training, Completed, Failed).
+- Subscription Tier: Read-only layout showing the user's plan limits (e.g., "BASIC: 3 Voice Models • 2 Locations").
+
+5. TAB 2: NAMES / VOICE MODELS (`names_page.dart`)
+--------------------------------------
+Manages the specific sound profiles the system recognizes.
+- Lists created user-trained alerts (e.g., "My Name", "Doorbell").
+- Controls to initiate new recordings to funnel into the ML pipeline.
+
+6. TAB 3: LISTENING (`listening_page.dart`)
+--------------------------------------
+The crucial real-time active tab for Deaf users.
+- Connects the microphone input (or connected hardware input) to the trained model.
+- Analyzes audio live. If a mapped frequency or sound profile is detected, it communicates with the ESP32 to trigger the haptic motors.
+- Features large, pulsating visual UI elements indicating "Actively Listening" vs "Idle".
+
+7. TAB 4: HISTORY (`history_page.dart`)
+--------------------------------------
+The detection audit log.
+- Pulls from the `detection_history` SQL table.
+- Lists exactly when sounds were detected, what the sound was, and where (location logic if linked).
+
+8. TAB 5: SETTINGS (`settings_page.dart`)
+--------------------------------------
+User configuration and hardware management.
+- Profile Section: Displays Full Name and Email. Includes a pop-out dialog to easily "Edit Name".
+- Hardware / BLE: Bluetooth mapping to sync with the ESP32 hardware ring/bracelet.
+- Ring Configuration: Management for vibration patterns (links physical feeling to different sounds).
+- Location Mapping: Accesses `LocationsPage` to tie sounds to specific geographic coordinates.
+- Sensitivity Toggles & Notification Toggles.
+- Sign Out Button (Clears session and pushes user back to the Login Screen).
+
+9. SERVICES & HARDWARE INTEGRATION (core/services/)
+--------------------------------------
+- BLE Service: Manages scanning, connection, and data transport to the ESP32 module.
+- Training Service: Interfaces with the Python backend to queue new audio samples, trigger training workflows, and poll for Model completion variables.
+- Location Service: Polls and tracks background/foreground GPS states to feed context into the voice detection engine.

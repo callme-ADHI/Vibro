@@ -1,25 +1,27 @@
 // VIBRO Home Page — White & Navy Enterprise (Tab Content)
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/ble_service.dart';
+import '../../core/providers/user_provider.dart';
 import 'training_status_page.dart';
 import 'locations_page.dart';
+import 'history_page.dart';
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  String _userName = 'User';
-  String _userEmail = '';
+class _HomePageState extends ConsumerState<HomePage> {
+  List<Map<String, dynamic>> _recentHistories = [];
   TrainingStatus _trainingStatus = TrainingStatus.notStarted;
   int _trainingProgress = 0;
   int _modelCount = 0;
@@ -46,33 +48,28 @@ class _HomePageState extends State<HomePage> {
   }
   
   void _loadAllData() {
-    _loadUserProfile();
     _loadTrainingStatus();
     _loadLocationCount();
     _loadDetectionCount();
+    _loadRecentHistories();
   }
 
-  Future<void> _loadUserProfile() async {
+  Future<void> _loadRecentHistories() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
-        if (_userEmail != user.email) setState(() => _userEmail = user.email ?? '');
+      if (user == null) return;
+      
+      final oneHourAgo = DateTime.now().subtract(const Duration(hours: 1)).toUtc().toIso8601String();
+      
+      final response = await Supabase.instance.client
+          .from('detection_history')
+          .select('*, trained_models(model_name)')
+          .eq('user_id', user.id)
+          .gte('created_at', oneHourAgo)
+          .order('created_at', ascending: false)
+          .limit(3);
 
-        // Only fetch profile if username is default
-        if (_userName == 'User') {
-             final response = await Supabase.instance.client
-                .from('profiles')
-                .select('username')
-                .eq('id', user.id)
-                .maybeSingle();
-
-            if (mounted && response != null && response['username'] != null) {
-              setState(() {
-                _userName = response['username'];
-              });
-            }
-        }
-      }
+      if (mounted) setState(() => _recentHistories = List<Map<String, dynamic>>.from(response));
     } catch (_) {}
   }
 
@@ -136,6 +133,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final userProfile = ref.watch(userProvider);
+    final String currentName = userProfile?['full_name'] ?? 'Loading...';
+    final String currentEmail = userProfile?['email'] ?? '';
+
     return Scaffold(
       backgroundColor: AppColors.lightSurface,
       appBar: AppBar(
@@ -180,45 +181,36 @@ class _HomePageState extends State<HomePage> {
             _buildCard(
               child: Row(
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryNavy,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        _userName.isNotEmpty ? _userName[0].toUpperCase() : 'U',
-                        style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Welcome back',
-                          style: AppTypography.metadata(color: AppColors.textSecondary),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _userName,
-                          style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
-                        ),
-                        if (_userEmail.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            _userEmail,
-                            style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
+                   Container(
+                     width: 48,
+                     height: 48,
+                     decoration: BoxDecoration(
+                       color: AppColors.primaryNavy,
+                       borderRadius: BorderRadius.circular(12),
+                     ),
+                     child: Center(
+                       child: Text(
+                         currentName.isNotEmpty && currentName != 'Loading...' ? currentName[0].toUpperCase() : 'U',
+                         style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
+                       ),
+                     ),
+                   ),
+                   const SizedBox(width: 16),
+                   Expanded(
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       children: [
+                         Text('Welcome back', style: AppTypography.metadata(color: AppColors.textSecondary)),
+                         const SizedBox(height: 2),
+                         Text(currentName, style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18)),
+                         if (currentEmail.isNotEmpty) ...[
+                           const SizedBox(height: 2),
+                           Text(currentEmail, style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12)),
+                         ],
+                       ],
+                     ),
+                   ),
+                 ],
               ),
             ),
 
@@ -334,6 +326,69 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
+
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildSectionHeader('Recent Detections (Past Hour)'),
+                GestureDetector(
+                  onTap: () {
+                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HistoryPage()));
+                  },
+                  child: Text('View All', style: AppTypography.bodySmall(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_recentHistories.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Center(
+                  child: Text('No detections in the past hour.', style: AppTypography.bodySmall(color: AppColors.textSecondary)),
+                ),
+              )
+            else
+              Column(
+                children: _recentHistories.map((log) {
+                  final String rawLabel = (log['detected_label'] ?? 'Unknown').toString();
+                  final String modelName = (log['trained_models'] != null ? log['trained_models']['model_name'] : null) ?? rawLabel;
+                  final String timeString = log['created_at'] != null ? DateTime.parse(log['created_at']).toLocal().toString().split('.').first : '';
+                  
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.divider),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.waves_rounded, color: AppColors.primaryNavy, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(modelName, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 2),
+                              Text(timeString, style: AppTypography.metadata(color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 18),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
 
             const SizedBox(height: 16),
           ],

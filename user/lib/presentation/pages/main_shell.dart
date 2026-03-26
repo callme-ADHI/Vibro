@@ -4,8 +4,8 @@ import '../widgets/vibro_bottom_nav.dart';
 import 'home_page.dart';
 import 'names_page.dart';
 import 'listening_page.dart';
-import 'history_page.dart';
-import 'settings_page.dart';
+import 'connections_page.dart';
+import 'profile_page.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -21,8 +21,8 @@ class _MainShellState extends State<MainShell> {
     HomePage(),
     NamesPage(),
     ListeningPage(),
-    HistoryPage(),
-    SettingsPage(),
+    ConnectionsPage(),
+    ProfilePage(),
   ];
 
   @override
