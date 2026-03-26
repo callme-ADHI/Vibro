@@ -59,9 +59,9 @@ class VibroBottomNav extends StatelessWidget {
               _buildCenterButton(),
               _buildNavItem(
                 index: 3,
-                icon: Icons.access_time_rounded,
-                activeIcon: Icons.access_time_filled_rounded,
-                label: 'History',
+                icon: Icons.subtitles_outlined,
+                activeIcon: Icons.subtitles_rounded,
+                label: 'Captions',
               ),
               _buildNavItem(
                 index: 4,

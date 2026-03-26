@@ -4,7 +4,7 @@ import '../widgets/vibro_bottom_nav.dart';
 import 'home_page.dart';
 import 'names_page.dart';
 import 'listening_page.dart';
-import 'history_page.dart';
+import 'live_captions_page.dart';
 import 'settings_page.dart';
 
 class MainShell extends StatefulWidget {
@@ -21,7 +21,7 @@ class _MainShellState extends State<MainShell> {
     HomePage(),
     NamesPage(),
     ListeningPage(),
-    HistoryPage(),
+    LiveCaptionsPage(),
     SettingsPage(),
   ];
 
