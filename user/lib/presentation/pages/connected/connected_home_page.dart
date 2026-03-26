@@ -23,7 +23,7 @@ final assignedModelsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
   for (final rel in relations) {
     final models = await Supabase.instance.client
         .from('relation_models')
-        .select('trained_name_id, trained_names(id, name)')
+        .select('trained_name_id, trained_names(id, name_label)')
         .eq('relation_id', rel['id']);
     
     // Get deaf user profile
@@ -291,7 +291,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage> {
                             Text('Active Models:', style: AppTypography.metadata(color: AppColors.textSecondary)),
                             const SizedBox(height: 8),
                             Wrap(spacing: 8, runSpacing: 6, children: models.map((m) {
-                              final name = (m['trained_names']?['name'] as String?) ?? 'Model';
+                              final name = (m['trained_names']?['name_label'] as String?) ?? 'Model';
                               return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(

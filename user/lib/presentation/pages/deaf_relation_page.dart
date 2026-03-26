@@ -54,10 +54,10 @@ class _DeafRelationPageState extends State<DeafRelationPage> {
         _labelController.text = _currentLabel ?? '';
       }
 
-      // Load my trained names
+      // Load my trained names (column is name_label)
       final names = await Supabase.instance.client
           .from('trained_names')
-          .select('id, name')
+          .select('id, name_label')
           .eq('user_id', me.id);
       _allNames = List<Map<String, dynamic>>.from(names);
 
@@ -274,7 +274,7 @@ class _DeafRelationPageState extends State<DeafRelationPage> {
                                 child: Icon(Icons.graphic_eq_rounded,
                                     color: isAssigned ? AppColors.primaryNavy : AppColors.textSecondary, size: 18),
                               ),
-                              title: Text(name['name'] ?? 'Unknown',
+                              title: Text(name['name_label'] ?? 'Unknown',
                                   style: TextStyle(
                                       fontWeight: isAssigned ? FontWeight.w600 : FontWeight.w500,
                                       color: AppColors.textPrimary)),

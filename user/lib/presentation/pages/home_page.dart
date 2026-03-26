@@ -58,16 +58,16 @@ class _HomePageState extends ConsumerState<HomePage> {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
-      
+
       final oneHourAgo = DateTime.now().subtract(const Duration(hours: 1)).toUtc().toIso8601String();
-      
+
       final response = await Supabase.instance.client
           .from('detection_history')
-          .select('*, trained_models(model_name)')
+          .select('detected_label, confidence, created_at')
           .eq('user_id', user.id)
           .gte('created_at', oneHourAgo)
           .order('created_at', ascending: false)
-          .limit(3);
+          .limit(10);
 
       if (mounted) setState(() => _recentHistories = List<Map<String, dynamic>>.from(response));
     } catch (_) {}
@@ -357,10 +357,13 @@ class _HomePageState extends ConsumerState<HomePage> {
             else
               Column(
                 children: _recentHistories.map((log) {
-                  final String rawLabel = (log['detected_label'] ?? 'Unknown').toString();
-                  final String modelName = (log['trained_models'] != null ? log['trained_models']['model_name'] : null) ?? rawLabel;
-                  final String timeString = log['created_at'] != null ? DateTime.parse(log['created_at']).toLocal().toString().split('.').first : '';
-                  
+                  final String label = (log['detected_label'] ?? 'Unknown').toString();
+                  final double confidence = ((log['confidence'] ?? 0.0) as num).toDouble();
+                  final String timeString = log['created_at'] != null
+                      ? DateTime.parse(log['created_at']).toLocal().toString().split('.').first
+                      : '';
+                  final int pct = (confidence * 100).round();
+
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(16),
@@ -371,19 +374,30 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.waves_rounded, color: AppColors.primaryNavy, size: 20),
+                        Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(color: AppColors.badgeBackground, borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.waves_rounded, color: AppColors.primaryNavy, size: 20),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(modelName, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
+                              Text(label, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
                               const SizedBox(height: 2),
                               Text(timeString, style: AppTypography.metadata(color: AppColors.textSecondary)),
                             ],
                           ),
                         ),
-                        Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 18),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text('$pct%', style: AppTypography.metadata(color: AppColors.success).copyWith(fontWeight: FontWeight.w700)),
+                        ),
                       ],
                     ),
                   );
