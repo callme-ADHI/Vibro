@@ -1,31 +1,41 @@
-// Connected User Home — with listening toggle and assigned models
+// Connected User Home — Real listening using RecognitionService + relation alerts
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:vibration/vibration.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/providers/user_provider.dart';
-import '../../../core/providers/connection_provider.dart';
-import 'connected_user_detail_page.dart';
 
-// Provider for assigned models for the connected user
-final assignedModelsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+import '../../../core/services/recognition_service.dart';
+import '../../../core/services/kws_service.dart';
+
+// ─── Provider for relations + assigned model names for the connected user ───
+final connectedRelationsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final me = Supabase.instance.client.auth.currentUser;
   if (me == null) return [];
-  // Find the relation where this connected user is the caregiver 
+
   final relations = await Supabase.instance.client
       .from('user_relationships')
       .select('id, relation_label, deaf_user_id')
       .eq('connected_user_id', me.id);
-  
+
   final List<Map<String, dynamic>> result = [];
   for (final rel in relations) {
+    // Get assigned model name_labels
     final models = await Supabase.instance.client
         .from('relation_models')
-        .select('trained_name_id, trained_names(id, name_label)')
+        .select('trained_names(id, name_label)')
         .eq('relation_id', rel['id']);
-    
+
+    final nameLabels = models
+        .map((m) => (m['trained_names']?['name_label'] as String?) ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
+
     // Get deaf user profile
     final deafProfile = await Supabase.instance.client
         .from('profiles')
@@ -38,7 +48,8 @@ final assignedModelsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
       'relation_label': rel['relation_label'] ?? 'Unknown',
       'deaf_user_id': rel['deaf_user_id'],
       'deaf_name': deafProfile?['full_name'] ?? 'Unknown',
-      'models': models,
+      'deaf_text_id': deafProfile?['user_id'] ?? '',
+      'name_labels': nameLabels,
     });
   }
   return result;
@@ -51,37 +62,167 @@ class ConnectedHomePage extends ConsumerStatefulWidget {
   ConsumerState<ConnectedHomePage> createState() => _ConnectedHomePageState();
 }
 
-class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage> {
-  bool _isListening = false;
-  Timer? _pulseTimer;
+class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
+    with SingleTickerProviderStateMixin {
+  final RecognitionService _recognition = RecognitionService.instance;
 
-  void _toggleListening() {
-    setState(() => _isListening = !_isListening);
-    if (_isListening) {
-      _startListeningSimulation();
-    } else {
-      _pulseTimer?.cancel();
-    }
-  }
+  RecognitionState _recState = RecognitionState.IDLE;
+  bool get _isListening =>
+      _recState == RecognitionState.LISTENING ||
+      _recState == RecognitionState.PROCESSING ||
+      _recState == RecognitionState.RESTARTING;
 
-  void _startListeningSimulation() {
-    // Real implementation would hook into KWS service
-    // For now, listening mode is toggled with visual feedback
-    _pulseTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      // In production: check KWS result, if match found → send alert
+  StreamSubscription<DetectionEvent>? _detectionSub;
+  StreamSubscription<RecognitionState>? _stateSub;
+
+  final List<Map<String, dynamic>> _localLog = []; // local session log
+  List<Map<String, dynamic>> _relations = [];
+  Set<String> _allNameLabels = {};
+
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseAnim;
+  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.3)
+        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+
+    _initNotifications();
+
+    _stateSub = _recognition.stateStream.listen((state) {
+      if (!mounted) return;
+      setState(() => _recState = state);
+      if (_isListening) {
+        if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+      } else {
+        _pulseCtrl.stop();
+        _pulseCtrl.reset();
+      }
+    });
+
+    _detectionSub = _recognition.detectionStream.listen((event) {
+      if (!mounted) return;
+      _onDetected(event);
     });
   }
 
-  @override
-  void dispose() {
-    _pulseTimer?.cancel();
-    super.dispose();
+  Future<void> _initNotifications() async {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    await _notifications.initialize(const InitializationSettings(android: android));
+    final platform = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await platform?.requestNotificationsPermission();
+  }
+
+  // ──── Load relations once available ────
+  void _onRelationsLoaded(List<Map<String, dynamic>> relations) {
+    _relations = relations;
+    _allNameLabels = relations
+        .expand((r) => (r['name_labels'] as List<dynamic>? ?? []).cast<String>())
+        .toSet();
+  }
+
+  // ──── Toggle Listening ────
+  void _toggleListening() {
+    if (_isListening) {
+      _recognition.stopListening();
+    } else {
+      _startListening();
+    }
+  }
+
+  Future<void> _startListening() async {
+    if (_allNameLabels.isEmpty) {
+      _showSnack('No models assigned yet. Ask your Deaf user to assign models first.', error: true);
+      return;
+    }
+    final initialized = await _recognition.initialize(_allNameLabels);
+    if (!initialized) {
+      _showSnack('Speech recognition not available.', error: true);
+      return;
+    }
+    _recognition.startListening();
+  }
+
+  // ──── On Detection → send alert to deaf user ────
+  Future<void> _onDetected(DetectionEvent event) async {
+    final me = Supabase.instance.client.auth.currentUser;
+    if (me == null) return;
+
+    // Which relation does this name belong to?
+    for (final rel in _relations) {
+      final labels = (rel['name_labels'] as List<dynamic>? ?? []).cast<String>();
+      if (labels.any((l) => l.toLowerCase() == event.name.toLowerCase())) {
+        final deafUserId = rel['deaf_user_id'] as String;
+        final relationLabel = rel['relation_label'] as String;
+
+        // Insert alert in DB
+        try {
+          await Supabase.instance.client.from('relation_alerts').insert({
+            'deaf_user_id': deafUserId,
+            'connected_user_id': me.id,
+            'relation_label': relationLabel,
+            'model_name': event.name,
+            'confidence': event.confidence,
+          });
+        } catch (_) {}
+
+        // Add to local log
+        if (mounted) {
+          setState(() {
+            _localLog.insert(0, {
+              'name': event.name,
+              'confidence': event.confidence,
+              'deaf_name': rel['deaf_name'],
+              'relation_label': relationLabel,
+              'timestamp': event.timestamp,
+            });
+            if (_localLog.length > 30) _localLog.removeLast();
+          });
+        }
+
+        // Feedback
+        _triggerFeedback(event.name, relationLabel, event.confidence);
+        break;
+      }
+    }
+  }
+
+  Future<void> _triggerFeedback(String name, String label, double confidence) async {
+    if (await Vibration.hasVibrator()) {
+      Vibration.vibrate(duration: 400);
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+
+    await _notifications.show(
+      0,
+      '🔊 $label Called!',
+      '"$name" detected (${(confidence * 100).toInt()}%)',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'vibro_connected', 'Connected Alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+      ),
+    );
+
+    if (mounted) {
+      _showSnack('"$name" detected → Alert sent to your Deaf user!');
+    }
   }
 
   Future<void> _sendManualAlert(String deafUserId, String label) async {
+    final me = Supabase.instance.client.auth.currentUser;
+    if (me == null) return;
     try {
-      final me = Supabase.instance.client.auth.currentUser;
-      if (me == null) return;
       await Supabase.instance.client.from('relation_alerts').insert({
         'deaf_user_id': deafUserId,
         'connected_user_id': me.id,
@@ -89,24 +230,39 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage> {
         'model_name': 'manual',
         'confidence': 1.0,
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Alert sent!'), backgroundColor: AppColors.success));
-      }
+      _showSnack('Manual alert sent to Deaf user!');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error));
-      }
+      _showSnack('Failed: $e', error: true);
     }
   }
+
+  void _showSnack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: error ? AppColors.error : AppColors.success,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _recognition.stopListening();
+    _detectionSub?.cancel();
+    _stateSub?.cancel();
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  // ════════════════════════════════════════════
+  //  BUILD
+  // ════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
     final userProfile = ref.watch(userProvider);
-    final String currentName = userProfile?['full_name'] ?? 'Caregiver';
-    final connections = ref.watch(connectionProvider);
-    final assignedAsync = ref.watch(assignedModelsProvider);
+    final currentName = userProfile?['full_name'] ?? 'Caregiver';
+    final relationsAsync = ref.watch(connectedRelationsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.lightSurface,
@@ -126,256 +282,264 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage> {
               style: AppTypography.sectionTitle(color: AppColors.textPrimary)
                   .copyWith(letterSpacing: 2, fontSize: 16)),
         ]),
+        actions: [
+          if (_isListening)
+            Container(
+              margin: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  color: AppColors.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 6, height: 6,
+                    decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Text('LIVE', style: AppTypography.bodySmall(color: AppColors.success)
+                    .copyWith(fontWeight: FontWeight.w700, fontSize: 11)),
+              ]),
+            ),
+        ],
         bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
             child: Container(height: 1, color: AppColors.divider)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Welcome card
-            Container(
-              padding: const EdgeInsets.all(20),
+      body: relationsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy)),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (relations) {
+          _onRelationsLoaded(relations);
+          return _buildBody(currentName, relations);
+        },
+      ),
+    );
+  }
+
+  Widget _buildBody(String currentName, List<Map<String, dynamic>> relations) {
+    return Column(
+      children: [
+        // ── Big Mic Button ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: _buildMicSection(relations),
+        ),
+
+        // ── Assigned Models Summary ──
+        if (relations.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: _buildRelationCards(relations),
+          ),
+
+        const SizedBox(height: 16),
+
+        // ── Detection Log ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Text('Detection Log', style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 15)),
+            const Spacer(),
+            if (_localLog.isNotEmpty)
+              GestureDetector(
+                onTap: () => setState(() => _localLog.clear()),
+                child: Text('Clear', style: AppTypography.bodySmall(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
+              ),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        Expanded(child: _localLog.isEmpty ? _buildEmptyLog() : _buildLogList()),
+      ],
+    );
+  }
+
+  // ─── Mic Section ───
+  Widget _buildMicSection(List<Map<String, dynamic>> relations) {
+    final hasModels = _allNameLabels.isNotEmpty;
+    return Column(children: [
+      // Big mic button
+      GestureDetector(
+        onTap: hasModels ? _toggleListening : null,
+        child: AnimatedBuilder(
+          animation: _pulseAnim,
+          builder: (context, child) {
+            return Container(
+              width: 140, height: 140,
               decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.divider)),
-              child: Row(children: [
-                Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(color: AppColors.primaryNavy, borderRadius: BorderRadius.circular(12)),
-                  child: Center(child: Text(
-                    currentName.isNotEmpty ? currentName[0].toUpperCase() : 'C',
-                    style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
-                  )),
-                ),
-                const SizedBox(width: 16),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Dashboard', style: AppTypography.metadata(color: AppColors.textSecondary)),
-                  Text(currentName,
-                      style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18)),
-                ])),
-              ]),
-            ),
-
-            const SizedBox(height: 24),
-
-            // ---- LISTENING TOGGLE ----
-            Text('Listening Mode',
-                style: AppTypography.sectionTitle(color: AppColors.textPrimary)
-                    .copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: _toggleListening,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                    color: _isListening ? AppColors.primaryNavy : AppColors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: _isListening ? AppColors.primaryNavy : AppColors.divider,
-                        width: _isListening ? 2 : 1),
-                    boxShadow: _isListening
-                        ? [BoxShadow(color: AppColors.primaryNavy.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))]
-                        : []),
-                child: Row(children: [
-                  Container(
-                    width: 52, height: 52,
+                shape: BoxShape.circle,
+                color: _isListening ? AppColors.primaryNavy.withOpacity(0.06) : Colors.transparent,
+              ),
+              child: Center(
+                child: Transform.scale(
+                  scale: _isListening ? _pulseAnim.value : 1.0,
+                  child: Container(
+                    width: 108, height: 108,
                     decoration: BoxDecoration(
-                        color: _isListening ? AppColors.white.withOpacity(0.2) : AppColors.badgeBackground,
-                        shape: BoxShape.circle),
+                      shape: BoxShape.circle,
+                      color: _isListening
+                          ? AppColors.primaryNavy
+                          : hasModels ? AppColors.white : AppColors.textSecondary.withOpacity(0.2),
+                      boxShadow: _isListening ? [
+                        BoxShadow(color: AppColors.primaryNavy.withOpacity(0.3), blurRadius: 20, spreadRadius: 4),
+                      ] : [
+                        BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2)),
+                      ],
+                    ),
                     child: Icon(
-                      _isListening ? Icons.mic_rounded : Icons.mic_off_rounded,
-                      color: _isListening ? AppColors.white : AppColors.primaryNavy,
-                      size: 26,
+                      _isListening ? Icons.mic_rounded : hasModels ? Icons.mic_none_rounded : Icons.mic_off_rounded,
+                      size: 40,
+                      color: _isListening ? AppColors.white : hasModels ? AppColors.primaryNavy : AppColors.textSecondary,
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(
-                      _isListening ? 'Listening Active' : 'Tap to Start Listening',
-                      style: AppTypography.bodyMedium(
-                          color: _isListening ? AppColors.white : AppColors.textPrimary)
-                          .copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    Text(
-                      _isListening
-                          ? 'Monitoring assigned models...'
-                          : 'Detects calls and sends alerts to your Deaf user',
-                      style: AppTypography.bodySmall(
-                          color: _isListening
-                              ? AppColors.white.withOpacity(0.7)
-                              : AppColors.textSecondary),
-                    ),
-                  ])),
-                  if (_isListening)
-                    const SizedBox(
-                      width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
-                    ),
-                ]),
+                ),
               ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // ---- ASSIGNED MODELS ----
-            Text('My Assigned Models',
-                style: AppTypography.sectionTitle(color: AppColors.textPrimary)
-                    .copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            assignedAsync.when(
-              loading: () => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())),
-              error: (_, __) => const Text('Could not load models'),
-              data: (relations) {
-                if (relations.isEmpty) {
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                        color: AppColors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.divider)),
-                    child: Column(children: [
-                      const Icon(Icons.model_training_rounded, size: 32, color: AppColors.textSecondary),
-                      const SizedBox(height: 8),
-                      Text('No models assigned yet.\nYour Deaf user must assign models.',
-                          textAlign: TextAlign.center,
-                          style: AppTypography.bodySmall(color: AppColors.textSecondary)),
-                    ]),
-                  );
-                }
-                return Column(
-                  children: relations.map((rel) {
-                    final label = rel['relation_label'] ?? 'Unknown';
-                    final deafName = rel['deaf_name'] ?? 'Unknown';
-                    final deafId = rel['deaf_user_id'] as String;
-                    final models = (rel['models'] as List<dynamic>? ?? []);
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                          color: AppColors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.divider)),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            const Icon(Icons.hearing_rounded, color: AppColors.primaryNavy, size: 20),
-                            const SizedBox(width: 10),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(deafName,
-                                  style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
-                              Text('They call you: $label',
-                                  style: AppTypography.metadata(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
-                            ])),
-                            GestureDetector(
-                              onTap: () => _sendManualAlert(deafId, label),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(color: AppColors.primaryNavy, borderRadius: BorderRadius.circular(20)),
-                                child: Text('Alert', style: AppTypography.metadata(color: AppColors.white).copyWith(fontWeight: FontWeight.w600)),
-                              ),
-                            ),
-                          ]),
-                          if (models.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            const Divider(height: 1),
-                            const SizedBox(height: 10),
-                            Text('Active Models:', style: AppTypography.metadata(color: AppColors.textSecondary)),
-                            const SizedBox(height: 8),
-                            Wrap(spacing: 8, runSpacing: 6, children: models.map((m) {
-                              final name = (m['trained_names']?['name_label'] as String?) ?? 'Model';
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                    color: AppColors.badgeBackground,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: AppColors.primaryNavy.withOpacity(0.2))),
-                                child: Text(name,
-                                    style: AppTypography.metadata(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
-                              );
-                            }).toList()),
-                          ],
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-
-            const SizedBox(height: 24),
-
-            // ---- LINKED DEAF USERS ----
-            Text('Your Deaf Users',
-                style: AppTypography.sectionTitle(color: AppColors.textPrimary)
-                    .copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            if (connections.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.divider)),
-                child: Column(children: [
-                  const Icon(Icons.link_off_rounded, color: AppColors.textSecondary, size: 32),
-                  const SizedBox(height: 12),
-                  Text('No users linked yet.', style: AppTypography.bodySmall(color: AppColors.textSecondary)),
-                ]),
-              )
-            else
-              Column(
-                children: connections.map((conn) {
-                  final targetId = conn['connected_user_id'] ?? '';
-                  final profile = conn['profiles'] as Map<String, dynamic>? ?? {};
-                  final targetName = profile['full_name'] ?? 'Unknown User';
-                  final targetUUID = profile['id'] as String? ?? '';
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                        color: AppColors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.divider)),
-                    child: Row(children: [
-                      CircleAvatar(
-                        backgroundColor: AppColors.badgeBackground,
-                        child: Text(targetName.isNotEmpty ? targetName[0] : 'U',
-                            style: const TextStyle(color: AppColors.primaryNavy, fontWeight: FontWeight.bold)),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(targetName,
-                            style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
-                        Text('ID: $targetId', style: AppTypography.metadata(color: AppColors.textSecondary)),
-                      ])),
-                      ElevatedButton(
-                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => ConnectedUserDetailPage(targetId: targetId, targetName: targetName))),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primaryNavy,
-                            foregroundColor: AppColors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            elevation: 0),
-                        child: const Text('Manage', style: TextStyle(fontSize: 13)),
-                      ),
-                    ]),
-                  );
-                }).toList(),
-              ),
-          ],
+            );
+          },
         ),
       ),
+      const SizedBox(height: 12),
+      Text(
+        _isListening ? 'Listening...' : hasModels ? 'Tap to Start Listening' : 'No Models Assigned',
+        style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 17),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        _isListening
+            ? 'Monitoring: ${_allNameLabels.join(", ")}'
+            : hasModels
+                ? 'Detects ${_allNameLabels.length} name(s) and alerts Deaf user'
+                : 'Ask your Deaf user to assign models first',
+        style: AppTypography.bodySmall(color: AppColors.textSecondary),
+        textAlign: TextAlign.center,
+      ),
+    ]);
+  }
+
+  // ─── Relation Cards ───
+  Widget _buildRelationCards(List<Map<String, dynamic>> relations) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Linked Deaf Users', style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 15)),
+        const SizedBox(height: 8),
+        ...relations.map((rel) {
+          final label = rel['relation_label'] as String;
+          final deafName = rel['deaf_name'] as String;
+          final deafId = rel['deaf_user_id'] as String;
+          final names = (rel['name_labels'] as List<dynamic>? ?? []).cast<String>();
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.divider)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.badgeBackground,
+                  child: Text(deafName.isNotEmpty ? deafName[0] : 'D',
+                      style: const TextStyle(color: AppColors.primaryNavy, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(deafName, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
+                  Text('They call you: $label', style: AppTypography.metadata(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
+                ])),
+                GestureDetector(
+                  onTap: () => _sendManualAlert(deafId, label),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(color: AppColors.primaryNavy, borderRadius: BorderRadius.circular(20)),
+                    child: Text('Alert', style: AppTypography.metadata(color: AppColors.white).copyWith(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ]),
+              if (names.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, runSpacing: 4, children: names.map((n) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                      color: AppColors.badgeBackground,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.primaryNavy.withOpacity(0.2))),
+                  child: Text(n, style: AppTypography.metadata(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
+                )).toList()),
+              ] else
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('No models assigned yet', style: AppTypography.metadata(color: AppColors.textSecondary)),
+                ),
+            ]),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ─── Empty Log ───
+  Widget _buildEmptyLog() {
+    return Center(
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(_isListening ? Icons.hearing_rounded : Icons.format_list_bulleted_rounded,
+            size: 36, color: AppColors.textSecondary.withOpacity(0.4)),
+        const SizedBox(height: 10),
+        Text(
+          _isListening ? 'Waiting for a voice match...' : 'Detections will appear here',
+          style: AppTypography.bodyMedium(color: AppColors.textSecondary),
+        ),
+      ]),
+    );
+  }
+
+  // ─── Log List ───
+  Widget _buildLogList() {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: _localLog.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, index) {
+        final log = _localLog[index];
+        final ts = log['timestamp'] as DateTime;
+        final pct = ((log['confidence'] as double) * 100).toInt();
+        final timeStr = '${ts.hour.toString().padLeft(2,'0')}:${ts.minute.toString().padLeft(2,'0')}:${ts.second.toString().padLeft(2,'0')}';
+        final isNew = index == 0 && DateTime.now().difference(ts).inSeconds < 4;
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+              color: isNew ? AppColors.primaryNavy.withOpacity(0.06) : AppColors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isNew ? AppColors.primaryNavy.withOpacity(0.3) : AppColors.divider)),
+          child: Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                  color: isNew ? AppColors.primaryNavy : AppColors.badgeBackground,
+                  borderRadius: BorderRadius.circular(8)),
+              child: Icon(Icons.record_voice_over_rounded,
+                  color: isNew ? AppColors.white : AppColors.primaryNavy, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(log['name'] as String,
+                  style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
+              Text('→ ${log['deaf_name']} (${log['relation_label']})',
+                  style: AppTypography.metadata(color: AppColors.textSecondary)),
+              Text(timeStr, style: AppTypography.metadata(color: AppColors.textSecondary)),
+            ])),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                  color: AppColors.success.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+              child: Text('$pct%', style: AppTypography.metadata(color: AppColors.success).copyWith(fontWeight: FontWeight.w700)),
+            ),
+          ]),
+        );
+      },
     );
   }
 }
