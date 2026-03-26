@@ -17,15 +17,35 @@ class ConnectionNotifier
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
 
-      // Load connections where I am the owner
-      final response = await Supabase.instance.client
+      final myProfile = await Supabase.instance.client
+          .from('profiles')
+          .select('user_id, user_type')
+          .eq('id', user.id)
+          .maybeSingle();
+      final myTextId = myProfile?['user_id'] as String? ?? '';
+
+      // Direction A: connections I initiated (user_id = me)
+      final asInitiator = await Supabase.instance.client
           .from('user_connections')
           .select('connected_user_id, created_at')
           .eq('user_id', user.id);
 
+      // Direction B: connections where I am the target (connected_user_id = myTextId)
+      final asTarget = myTextId.isNotEmpty
+          ? await Supabase.instance.client
+              .from('user_connections')
+              .select('user_id, created_at')
+              .eq('connected_user_id', myTextId)
+          : [];
+
       final List<Map<String, dynamic>> enriched = [];
-      for (final conn in response) {
+      final Set<String> seen = {};
+
+      // Process initiated connections — target is connected_user_id (text ID)
+      for (final conn in asInitiator) {
         final targetTextId = conn['connected_user_id'] as String;
+        if (seen.contains(targetTextId)) continue;
+        seen.add(targetTextId);
         final profile = await Supabase.instance.client
             .from('profiles')
             .select('id, full_name, user_type, user_id')
@@ -37,6 +57,26 @@ class ConnectionNotifier
           'profiles': profile ?? {},
         });
       }
+
+      // Process target connections — initiator is user_id (UUID), need to look up their text ID
+      for (final conn in asTarget) {
+        final initiatorUUID = conn['user_id'] as String;
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('id, full_name, user_type, user_id')
+            .eq('id', initiatorUUID)
+            .maybeSingle();
+        if (profile == null) continue;
+        final textId = profile['user_id'] as String? ?? '';
+        if (seen.contains(textId)) continue;
+        seen.add(textId);
+        enriched.add({
+          'connected_user_id': textId,
+          'created_at': conn['created_at'],
+          'profiles': profile,
+        });
+      }
+
       if (mounted) state = enriched;
     } catch (_) {}
   }

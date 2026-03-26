@@ -203,8 +203,8 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
 
     await _notifications.show(
       0,
-      '🔊 $label Called!',
-      '"$name" detected (${(confidence * 100).toInt()}%)',
+      '🎙️ You called "$name"!',
+      'Alert sent to $label → Deaf user notified',
       const NotificationDetails(
         android: AndroidNotificationDetails(
           'vibro_connected', 'Connected Alerts',
@@ -215,7 +215,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     );
 
     if (mounted) {
-      _showSnack('"$name" detected → Alert sent to your Deaf user!');
+      _showSnack('You called "$name" → $label has been notified!');
     }
   }
 

@@ -14,6 +14,7 @@ import '../../core/services/ble_service.dart'; // BLE Integration
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'locations_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ListeningPage extends StatefulWidget {
   const ListeningPage({super.key});
@@ -43,6 +44,7 @@ class _ListeningPageState extends State<ListeningPage>
   StreamSubscription<RecognitionState>? _stateSub;
   StreamSubscription? _bleSub;
   Timer? _refreshTimer;
+  RealtimeChannel? _alertChannel; // relation_alerts realtime
   
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
@@ -105,7 +107,7 @@ class _ListeningPageState extends State<ListeningPage>
       }
     });
 
-    _detectionSub = _recognition.detectionStream.listen((event) {
+      _detectionSub = _recognition.detectionStream.listen((event) {
       if (!mounted) return;
       
       setState(() {
@@ -121,6 +123,71 @@ class _ListeningPageState extends State<ListeningPage>
           locationId: _selectedLocationId == _allNamesId ? null : _selectedLocationId,
       );
     });
+
+    // Listen for relation_alerts from Connected users (real-time)
+    _subscribeToRelationAlerts();
+  }
+
+  void _subscribeToRelationAlerts() {
+    final me = Supabase.instance.client.auth.currentUser;
+    if (me == null) return;
+    _alertChannel = Supabase.instance.client
+        .channel('relation_alerts_${me.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'relation_alerts',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'deaf_user_id',
+            value: me.id,
+          ),
+          callback: (payload) {
+            if (!mounted) return;
+            final data = payload.newRecord;
+            final label = data['relation_label'] as String? ?? 'Someone';
+            final modelName = data['model_name'] as String? ?? 'a name';
+            _onRelationAlert(label, modelName);
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _onRelationAlert(String label, String modelName) async {
+    // Vibrate
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 400, 200, 400]);
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+    // BLE flash
+    if (_isBleConnected) _bleService.blinkLed();
+
+    // Notification to deaf user
+    const androidDetails = AndroidNotificationDetails(
+      'vibro_relation_alerts',
+      'Caregiver Alerts',
+      channelDescription: 'Alerts from connected caregivers',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    await _notifications.show(
+      1,
+      '📣 $label called you!',
+      'They said "$modelName" — tap to respond',
+      const NotificationDetails(android: androidDetails),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('$label called you! ("$modelName")',
+            style: AppTypography.bodyMedium(color: AppColors.white)),
+        backgroundColor: AppColors.primaryNavy,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
   Future<void> _loadNamesAndInit({bool silent = false}) async {
@@ -279,6 +346,7 @@ class _ListeningPageState extends State<ListeningPage>
     _detectionSub?.cancel();
     _stateSub?.cancel();
     _bleSub?.cancel();
+    _alertChannel?.unsubscribe();
     _pulseCtrl.dispose();
     super.dispose();
   }
