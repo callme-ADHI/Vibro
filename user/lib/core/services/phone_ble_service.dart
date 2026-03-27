@@ -169,7 +169,13 @@ class ConnectedPhoneBleServer {
     } catch (e) {
       print('VIBRO-SERVER: Failed: $e');
       _updateStatus(PhoneBleStatus.unsupported);
-      rethrow;
+      final errorStr = e.toString();
+      if (errorStr.contains('IllegalStateException') || errorStr.contains('unsupported')) {
+        throw 'This device does not support Bluetooth Advertising. Alerts will be sent via internet.';
+      } else if (errorStr.contains('denied') || errorStr.contains('permission')) {
+        throw 'Bluetooth permissions were denied.';
+      }
+      throw 'Bluetooth error: $errorStr';
     }
   }
 

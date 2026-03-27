@@ -152,7 +152,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
       try {
         await _ble.startAdvertising();
       } catch (e) {
-        _showSnack('BLE Advertising Error: $e', error: true);
+        _showSnack(e.toString(), error: true);
       }
     }
   }
@@ -174,7 +174,9 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     }
     // Auto-ensure advertising so Deaf phone can connect
     if (_bleStatus == PhoneBleStatus.idle || _bleStatus == PhoneBleStatus.unsupported) {
-      _ble.startAdvertising();
+      _ble.startAdvertising().catchError((e) {
+        _showSnack(e.toString(), error: true);
+      });
     }
     final initialized = await _recognition.initialize(_allNameLabels);
     if (!initialized) {
