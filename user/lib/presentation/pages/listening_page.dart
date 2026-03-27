@@ -10,7 +10,8 @@ import '../../core/services/name_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/history_service.dart';
 import '../../core/services/kws_service.dart'; // DetectionEvent
-import '../../core/services/ble_service.dart'; // BLE Integration
+import '../../core/services/ble_service.dart'; // BLE (ESP32)
+import '../../core/services/phone_ble_service.dart'; // Phone-to-phone BLE
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'locations_page.dart';
@@ -29,7 +30,8 @@ class _ListeningPageState extends State<ListeningPage>
   final NameService _nameService = NameService.instance;
   final LocationService _locationService = LocationService.instance;
   final BleService _bleService = BleService.instance;
-  
+  final DeafPhoneBleServer _phoneBle = DeafPhoneBleServer.instance;  // BLE server
+
   // State from Service
   RecognitionState _recState = RecognitionState.IDLE;
   bool get _isListening => _recState == RecognitionState.LISTENING || 
@@ -43,8 +45,13 @@ class _ListeningPageState extends State<ListeningPage>
   StreamSubscription<DetectionEvent>? _detectionSub;
   StreamSubscription<RecognitionState>? _stateSub;
   StreamSubscription? _bleSub;
+  StreamSubscription<PhoneAlertPayload>? _phoneBleAlertSub;
+  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
   Timer? _refreshTimer;
-  RealtimeChannel? _alertChannel; // relation_alerts realtime
+  RealtimeChannel? _alertChannel;
+
+  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
+  bool get _isPhonePaired => _phoneBleStatus == PhoneBleStatus.paired;
   
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
@@ -75,6 +82,18 @@ class _ListeningPageState extends State<ListeningPage>
     
     // Auto-refresh every 5s
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
+
+    // Start phone-to-phone BLE advertising (Deaf phone is always the server)
+    _phoneBle.startAdvertising();
+    _phoneBleStatusSub = _phoneBle.statusStream.listen((s) {
+      if (!mounted) return;
+      setState(() => _phoneBleStatus = s);
+    });
+    _phoneBleAlertSub = _phoneBle.alertStream.listen((payload) {
+      if (!mounted) return;
+      _onPhoneBleAlert(payload);
+    });
+    _phoneBleStatus = _phoneBle.status;
 
     // BLE Init
     _bleService.initialize();
@@ -124,8 +143,48 @@ class _ListeningPageState extends State<ListeningPage>
       );
     });
 
-    // Listen for relation_alerts from Connected users (real-time)
+    // Listen for relation_alerts from Connected users (real-time DB fallback)
     _subscribeToRelationAlerts();
+  }
+
+  // ── Phone BLE Alert handler (primary path) ────────────────────────────────
+  Future<void> _onPhoneBleAlert(PhoneAlertPayload payload) async {
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 500, 150, 500]);
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+    if (_isBleConnected) _bleService.blinkLed();
+
+    await _notifications.show(
+      2,
+      '📣 ${payload.label} called you!',
+      'They said "${payload.name}" via Bluetooth',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'vibro_ble_alerts', 'BLE Alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+      ),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [
+          const Icon(Icons.bluetooth_rounded, color: AppColors.white, size: 16),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            '${payload.label} called you! ("${payload.name}" · ${(payload.confidence * 100).toInt()}%)',
+            style: AppTypography.bodyMedium(color: AppColors.white),
+          )),
+        ]),
+        backgroundColor: AppColors.primaryNavy,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
   void _subscribeToRelationAlerts() {
@@ -346,7 +405,10 @@ class _ListeningPageState extends State<ListeningPage>
     _detectionSub?.cancel();
     _stateSub?.cancel();
     _bleSub?.cancel();
+    _phoneBleAlertSub?.cancel();
+    _phoneBleStatusSub?.cancel();
     _alertChannel?.unsubscribe();
+    _phoneBle.stopAdvertising();
     _pulseCtrl.dispose();
     super.dispose();
   }
