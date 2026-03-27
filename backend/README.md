@@ -77,7 +77,7 @@ backend/
 4. **audio_submissions** - Training data uploads
 5. **training_queue** - Colab job management
 6. **trained_models** - Model metadata
-7. **locations** - Detection contexts
+7. **locations** - Detection contexts (includes GPS coordinates & geofencing radius)
 8. **location_name_mapping** - Name-location assignments
 9. **detection_history** - All voice detections
 10. **device_registry** - ESP32 devices
