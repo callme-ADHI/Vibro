@@ -8,10 +8,12 @@ import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/ble_service.dart';
+import '../../core/services/phone_ble_service.dart';
 import '../../core/providers/user_provider.dart';
 import 'training_status_page.dart';
 import 'locations_page.dart';
 import 'history_page.dart';
+import 'ble_devices_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -27,10 +29,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   int _modelCount = 0;
   int _locationCount = 0;
   int _detectionCount = 0; // Added detection count
-  bool _isBleConnected = false; 
+  bool _isBleConnected = false;
+  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
 
   Timer? _refreshTimer;
   StreamSubscription? _bleSub;
+  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
 
   @override
   void initState() {
@@ -40,11 +44,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     // Auto refresh every 5s
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadAllData());
 
-    // BLE Status
+    // BLE Status (ESP32)
     _bleSub = BleService.instance.connectionStream.listen((connected) {
        if (mounted) setState(() => _isBleConnected = connected);
     });
-    _isBleConnected = BleService.instance.isConnected; // Initial check
+    _isBleConnected = BleService.instance.isConnected;
+
+    // Phone BLE status (Connected user pairing)
+    _phoneBleStatus = DeafPhoneBleClient.instance.status;
+    _phoneBleStatusSub = DeafPhoneBleClient.instance.statusStream.listen((s) {
+      if (mounted) setState(() => _phoneBleStatus = s);
+    });
   }
   
   void _loadAllData() {
@@ -254,11 +264,22 @@ class _HomePageState extends ConsumerState<HomePage> {
                     statusColor: _locationCount > 0 ? AppColors.success : AppColors.accentNavy,
                   ),
                 ),
-                _buildFeatureCard(
-                  icon: Icons.developer_board_rounded,
-                  title: 'Device',
-                  subtitle: _isBleConnected ? 'Connected' : 'Not Connected',
-                  statusColor: _isBleConnected ? AppColors.success : AppColors.error,
+                GestureDetector(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BleDevicesPage()),
+                  ),
+                  child: _buildFeatureCard(
+                    icon: _phoneBleStatus == PhoneBleStatus.paired
+                        ? Icons.bluetooth_connected_rounded
+                        : Icons.developer_board_rounded,
+                    title: 'Device',
+                    subtitle: _phoneBleStatus == PhoneBleStatus.paired
+                        ? 'BLE Paired'
+                        : _isBleConnected ? 'ESP32 Connected' : 'Tap to pair',
+                    statusColor: _phoneBleStatus == PhoneBleStatus.paired
+                        ? AppColors.success
+                        : _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -275,6 +296,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                       'ESP32 Device', 
                       _isBleConnected ? 'Online' : 'Offline', 
                       _isBleConnected ? AppColors.success : AppColors.error
+                  ),
+                  const Divider(color: AppColors.divider, height: 1),
+                  _buildStatusRow(
+                      'Phone BLE',
+                      _phoneBleStatus == PhoneBleStatus.paired
+                          ? 'Paired · ${DeafPhoneBleClient.instance.pairedDeviceName}'
+                          : _phoneBleStatus == PhoneBleStatus.scanning ? 'Scanning…' : 'Not paired',
+                      _phoneBleStatus == PhoneBleStatus.paired ? AppColors.success : AppColors.textSecondary,
                   ),
                   const Divider(color: AppColors.divider, height: 1),
                   _buildStatusRow(

@@ -30,7 +30,7 @@ class _ListeningPageState extends State<ListeningPage>
   final NameService _nameService = NameService.instance;
   final LocationService _locationService = LocationService.instance;
   final BleService _bleService = BleService.instance;
-  final DeafPhoneBleServer _phoneBle = DeafPhoneBleServer.instance;  // BLE server
+  final DeafPhoneBleClient _phoneBle = DeafPhoneBleClient.instance;  // BLE server
 
   // State from Service
   RecognitionState _recState = RecognitionState.IDLE;
@@ -84,7 +84,7 @@ class _ListeningPageState extends State<ListeningPage>
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
 
     // Start phone-to-phone BLE advertising (Deaf phone is always the server)
-    _phoneBle.startAdvertising();
+    _phoneBle.disconnect() // client does not advertise;
     _phoneBleStatusSub = _phoneBle.statusStream.listen((s) {
       if (!mounted) return;
       setState(() => _phoneBleStatus = s);
@@ -408,7 +408,7 @@ class _ListeningPageState extends State<ListeningPage>
     _phoneBleAlertSub?.cancel();
     _phoneBleStatusSub?.cancel();
     _alertChannel?.unsubscribe();
-    _phoneBle.stopAdvertising();
+    _phoneBle.disconnect();
     _pulseCtrl.dispose();
     super.dispose();
   }

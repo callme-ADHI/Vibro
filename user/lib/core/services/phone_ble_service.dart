@@ -1,34 +1,33 @@
-// VIBRO — Phone-to-Phone BLE Service
-// Uses bluetooth_low_energy 6.2.x (supports Central + Peripheral roles).
+// VIBRO — Phone-to-Phone BLE Service (Corrected Architecture)
+// Uses bluetooth_low_energy 6.2.x
 //
-// ┌───────────────────────────────────────────────────────────────────────┐
-// │  ARCHITECTURE                                                         │
-// │                                                                       │
-// │  Deaf Phone          BLE GATT            Connected Phone              │
-// │  [Peripheral]  ◄── write alert ──────── [Central]                    │
-// │  [GATT Server]     "DAD|HARI|0.92"      [GATT Client]                │
-// │                                                                       │
-// │  Flow:                                                                │
-// │   1. Deaf phone advertises VIBRO-DEAF service UUID                   │
-// │   2. Connected phone scans → find → connect → discover               │
-// │   3. On name detected: Connected writes "LABEL|NAME|CONF"            │
-// │   4. Deaf phone: characteristicWriteRequested fires → alert          │
-// └───────────────────────────────────────────────────────────────────────┘
+// ┌──────────────────────────────────────────────────────────────────────────┐
+// │  ARCHITECTURE                                                            │
+// │                                                                          │
+// │  Connected Phone                           Deaf Phone                   │
+// │  [PERIPHERAL / GATT SERVER]   ──────────►  [CENTRAL / GATT CLIENT]     │
+// │   • Advertises "VIBRO-CONNECT"              • Scans & discovers nearby  │
+// │   • Waits for Deaf phone to connect         • User picks device to pair │
+// │   • On name detected → NOTIFY deaf          • Subscribes to notification│
+// │     characteristic value                    • Receives → vibrate/alert  │
+// │                                                                          │
+// │  Alert Payload: "LABEL|NAME|0.92"                                        │
+// └──────────────────────────────────────────────────────────────────────────┘
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 
 // ── UUIDs ──────────────────────────────────────────────────────────────────
-final _kServiceUUID   = UUID.fromString('4a4b4c00-cafe-babe-deaf-c0ffee123456');
-final _kAlertCharUUID = UUID.fromString('4a4b4c01-cafe-babe-deaf-c0ffee123456');
-const kVibroDeviceLocalName = 'VIBRO-DEAF';
+final kVibroServiceUUID   = UUID.fromString('4a4b4c00-cafe-babe-c0ff-ee1234567890');
+final kVibroAlertCharUUID = UUID.fromString('4a4b4c01-cafe-babe-c0ff-ee1234567890');
+const kVibroDeviceLocalName = 'VIBRO-CONNECT';
 
-// ── Payload ────────────────────────────────────────────────────────────────
+// ── Alert payload ──────────────────────────────────────────────────────────
 class PhoneAlertPayload {
-  final String label;        // "DAD"
-  final String name;         // "HARI"
-  final double confidence;   // 0.92
+  final String label;       // "DAD"      (alias deaf user gave to this person)
+  final String name;        // "HARI"     (model name detected)
+  final double confidence;  // 0.92
 
   const PhoneAlertPayload({
     required this.label,
@@ -54,61 +53,74 @@ class PhoneAlertPayload {
   }
 }
 
-// ── Status ─────────────────────────────────────────────────────────────────
+// ── Discovered device info (used in UI scan list) ─────────────────────────
+class DiscoveredVibroDevice {
+  final Peripheral peripheral;
+  final String name;
+  final int rssi; // signal strength
+
+  const DiscoveredVibroDevice({
+    required this.peripheral,
+    required this.name,
+    required this.rssi,
+  });
+}
+
+// ── BLE Status ─────────────────────────────────────────────────────────────
 enum PhoneBleStatus {
   idle,
-  advertising,    // Deaf: GATT server active, no central connected
-  scanning,       // Connected: searching for Deaf phone
-  connecting,     // Connected: GATT connect in progress
-  paired,         // Active GATT connection
+  advertising,    // Connected phone: actively advertising
+  scanning,       // Deaf phone: scanning for devices
+  connecting,     // Deaf phone: connecting to a selected device
+  paired,         // Both: GATT connection active
   disconnected,
   unsupported,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  DEAF PHONE — GATT SERVER (Peripheral)
-// ═══════════════════════════════════════════════════════════════════════════
-class DeafPhoneBleServer {
-  DeafPhoneBleServer._();
-  static final instance = DeafPhoneBleServer._();
+// ════════════════════════════════════════════════════════════════════════════
+//  CONNECTED PHONE — GATT SERVER (Peripheral/Advertiser)
+//  Advertises itself so Deaf phone can find and connect.
+//  On name detection: notifies the connected Deaf phone via characteristic.
+// ════════════════════════════════════════════════════════════════════════════
+class ConnectedPhoneBleServer {
+  ConnectedPhoneBleServer._();
+  static final instance = ConnectedPhoneBleServer._();
 
   final PeripheralManager _pm = PeripheralManager();
 
   final _statusCtrl = StreamController<PhoneBleStatus>.broadcast();
   Stream<PhoneBleStatus> get statusStream => _statusCtrl.stream;
 
-  final _alertCtrl = StreamController<PhoneAlertPayload>.broadcast();
-  Stream<PhoneAlertPayload> get alertStream => _alertCtrl.stream;
-
   PhoneBleStatus _status = PhoneBleStatus.idle;
   PhoneBleStatus get status => _status;
-  bool get isPaired => _status == PhoneBleStatus.paired;
+  bool get isAdvertising => _status == PhoneBleStatus.advertising;
+  bool get isPaired    => _status == PhoneBleStatus.paired;
 
+  // Track connected centrals (Deaf phones)
+  final List<Central> _connectedCentrals = [];
   GATTCharacteristic? _alertChar;
-  StreamSubscription? _writeSub;
+
   StreamSubscription? _connSub;
+  StreamSubscription? _notifySub;
 
   // ── Start advertising ─────────────────────────────────────────────────────
   Future<void> startAdvertising() async {
     try {
-      // Build mutable alert characteristic — write + notify
+      // Alert characteristic — NOTIFY so Deaf phone can subscribe
       _alertChar = GATTCharacteristic.mutable(
-        uuid: _kAlertCharUUID,
+        uuid: kVibroAlertCharUUID,
         properties: [
-          GATTCharacteristicProperty.write,
-          GATTCharacteristicProperty.writeWithoutResponse,
           GATTCharacteristicProperty.notify,
+          GATTCharacteristicProperty.read,
         ],
         permissions: [
-          GATTCharacteristicPermission.write,
-          GATTCharacteristicPermission.writeEncrypted, // write (encrypted version also works)
+          GATTCharacteristicPermission.read,
         ],
         descriptors: [],
       );
 
-      // Service
       final service = GATTService(
-        uuid: _kServiceUUID,
+        uuid: kVibroServiceUUID,
         isPrimary: true,
         includedServices: [],
         characteristics: [_alertChar!],
@@ -117,49 +129,68 @@ class DeafPhoneBleServer {
       await _pm.removeAllServices();
       await _pm.addService(service);
 
-      // Listen for writes from the Connected phone
-      _writeSub?.cancel();
-      _writeSub = _pm.characteristicWriteRequested.listen((e) async {
-        if (e.characteristic.uuid == _kAlertCharUUID) {
-          final bytes = e.request.value;
-          // Respond with OK
-          try { await _pm.respondWriteRequest(e.request); } catch (_) {}
-          // Decode and forward
-          final payload = PhoneAlertPayload.decode(bytes);
-          if (payload != null) {
-            print('VIBRO-BLE-SERVER: ✅ Alert received: ${utf8.decode(bytes)}');
-            _alertCtrl.add(payload);
-          }
+      // Track central (Deaf phone) connections
+      _connSub?.cancel();
+      _connSub = _pm.connectionStateChanged.listen((e) {
+        if (e.state == ConnectionState.connected) {
+          _connectedCentrals.add(e.central);
+          _updateStatus(PhoneBleStatus.paired);
+          print('VIBRO-SERVER: Deaf phone connected ✓');
+        } else {
+          _connectedCentrals.remove(e.central);
+          _updateStatus(_connectedCentrals.isEmpty
+              ? PhoneBleStatus.advertising
+              : PhoneBleStatus.paired);
+          print('VIBRO-SERVER: Deaf phone disconnected');
         }
       });
 
-      // Track central connect/disconnect
-      _connSub?.cancel();
-      _connSub = _pm.connectionStateChanged.listen((e) {
-        final s = e.state == ConnectionState.connected
-            ? PhoneBleStatus.paired
-            : PhoneBleStatus.advertising;
-        _updateStatus(s);
-        print('VIBRO-BLE-SERVER: Central ${e.state.name}');
+      // Track notify subscriptions from Deaf phone
+      _notifySub?.cancel();
+      _notifySub = _pm.characteristicNotifyStateChanged.listen((e) {
+        print('VIBRO-SERVER: Notify state → ${e.state} for ${e.central.uuid.toString()}');
       });
 
       // Start advertising
       await _pm.startAdvertising(Advertisement(
         name: kVibroDeviceLocalName,
-        serviceUUIDs: [_kServiceUUID],
+        serviceUUIDs: [kVibroServiceUUID],
       ));
 
       _updateStatus(PhoneBleStatus.advertising);
-      print('VIBRO-BLE-SERVER: Advertising as "$kVibroDeviceLocalName" ✓');
+      print('VIBRO-SERVER: Advertising as "$kVibroDeviceLocalName" ✓');
     } catch (e) {
-      print('VIBRO-BLE-SERVER: Failed: $e');
+      print('VIBRO-SERVER: Failed: $e');
       _updateStatus(PhoneBleStatus.unsupported);
     }
   }
 
+  // ── Send alert to all connected Deaf phones ───────────────────────────────
+  Future<bool> sendAlert(PhoneAlertPayload payload) async {
+    if (_alertChar == null || _connectedCentrals.isEmpty) {
+      print('VIBRO-SERVER: No Deaf phones connected');
+      return false;
+    }
+
+    bool anySent = false;
+    final bytes = payload.encode();
+
+    for (final central in List.from(_connectedCentrals)) {
+      try {
+        await _pm.notifyCharacteristic(central, _alertChar!, value: bytes);
+        print('VIBRO-SERVER: ✅ Alert sent to ${central.uuid.toString()} → ${utf8.decode(bytes)}');
+        anySent = true;
+      } catch (e) {
+        print('VIBRO-SERVER: Notify failed for ${central.uuid.toString()}: $e');
+      }
+    }
+    return anySent;
+  }
+
   Future<void> stopAdvertising() async {
-    _writeSub?.cancel();
     _connSub?.cancel();
+    _notifySub?.cancel();
+    _connectedCentrals.clear();
     try { await _pm.stopAdvertising(); } catch (_) {}
     try { await _pm.removeAllServices(); } catch (_) {}
     _updateStatus(PhoneBleStatus.idle);
@@ -173,173 +204,194 @@ class DeafPhoneBleServer {
   void dispose() {
     stopAdvertising();
     _statusCtrl.close();
-    _alertCtrl.close();
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  CONNECTED PHONE — GATT CLIENT (Central)
-// ═══════════════════════════════════════════════════════════════════════════
-class ConnectedPhoneBleClient {
-  ConnectedPhoneBleClient._();
-  static final instance = ConnectedPhoneBleClient._();
+// ════════════════════════════════════════════════════════════════════════════
+//  DEAF PHONE — GATT CLIENT (Central/Scanner)
+//  Scans for Connected phones, user picks one to pair.
+//  Subscribes to alert characteristic → receives name detections.
+// ════════════════════════════════════════════════════════════════════════════
+class DeafPhoneBleClient {
+  DeafPhoneBleClient._();
+  static final instance = DeafPhoneBleClient._();
 
   final CentralManager _cm = CentralManager();
 
+  // ── Status stream ──────────────────────────────────────────────────────────
   final _statusCtrl = StreamController<PhoneBleStatus>.broadcast();
   Stream<PhoneBleStatus> get statusStream => _statusCtrl.stream;
 
+  // ── Discovered devices stream (for the scan page UI) ──────────────────────
+  final _discoveredCtrl =
+      StreamController<List<DiscoveredVibroDevice>>.broadcast();
+  Stream<List<DiscoveredVibroDevice>> get discoveredStream =>
+      _discoveredCtrl.stream;
+
+  // ── Alert stream (incoming detections from Connected phone) ───────────────
+  final _alertCtrl = StreamController<PhoneAlertPayload>.broadcast();
+  Stream<PhoneAlertPayload> get alertStream => _alertCtrl.stream;
+
   PhoneBleStatus _status = PhoneBleStatus.idle;
   PhoneBleStatus get status => _status;
-  bool get isPaired => _status == PhoneBleStatus.paired;
+  bool get isPaired   => _status == PhoneBleStatus.paired;
+  bool get isScanning => _status == PhoneBleStatus.scanning;
 
-  Peripheral? _deafPhone;
-  GATTCharacteristic? _alertChar;
+  // Track paired device info
+  Peripheral? _pairedPeripheral;
+  String _pairedDeviceName = '';
+  String get pairedDeviceName => _pairedDeviceName;
 
+  final Map<String, DiscoveredVibroDevice> _discovered = {};
   StreamSubscription? _discoverySub;
   StreamSubscription? _connSub;
+  StreamSubscription? _notifySub;
   StreamSubscription? _stateSub;
-  Timer? _retryTimer;
-  bool _shouldConnect = false;
+  Timer? _scanStopTimer;
 
-  // ── Start scanning for the Deaf phone ─────────────────────────────────────
-  Future<void> startScanning() async {
-    if (_status == PhoneBleStatus.scanning || _status == PhoneBleStatus.paired) return;
-    _shouldConnect = true;
+  // ── Start scanning ─────────────────────────────────────────────────────────
+  Future<void> startScan() async {
+    if (_status == PhoneBleStatus.scanning) return;
 
-    // React to BT adapter changes
-    _stateSub ??= _cm.stateChanged.listen((e) {
-      if (e.state == BluetoothLowEnergyState.poweredOn && _shouldConnect) {
-        _doScan();
-      }
-    });
-
-    // Connection state changes
-    _connSub?.cancel();
-    _connSub = _cm.connectionStateChanged.listen((e) async {
-      if (e.state == ConnectionState.connected) {
-        _updateStatus(PhoneBleStatus.paired);
-        await _discoverAlertChar(e.peripheral);
-      } else if (e.state == ConnectionState.disconnected) {
-        _alertChar = null;
-        _updateStatus(PhoneBleStatus.disconnected);
-        if (_shouldConnect) {
-          _retryTimer = Timer(const Duration(seconds: 3), _doScan);
-        }
-      }
-    });
-
-    _doScan();
-  }
-
-  void _doScan() {
-    if (!_shouldConnect) return;
+    _discovered.clear();
+    _discoveredCtrl.add([]);
     _updateStatus(PhoneBleStatus.scanning);
-    print('VIBRO-BLE-CLIENT: Scanning for "$kVibroDeviceLocalName"...');
+    print('VIBRO-CLIENT: Starting scan for "$kVibroDeviceLocalName"...');
 
     _discoverySub?.cancel();
-    _discoverySub = _cm.discovered.listen((e) async {
+    _discoverySub = _cm.discovered.listen((e) {
       final name = e.advertisement.name ?? '';
-      final hasVibro = name == kVibroDeviceLocalName ||
-          e.advertisement.serviceUUIDs.any(
-            (u) => u.toString().toLowerCase() == _kServiceUUID.toString().toLowerCase(),
-          );
+      final hasService = e.advertisement.serviceUUIDs.any(
+        (u) => u.toString().toLowerCase() == kVibroServiceUUID.toString().toLowerCase(),
+      );
 
-      if (hasVibro) {
-        print('VIBRO-BLE-CLIENT: Deaf phone found → ${e.peripheral.uuid}');
-        await _cm.stopDiscovery();
-        _discoverySub?.cancel();
-        _deafPhone = e.peripheral;
-        _updateStatus(PhoneBleStatus.connecting);
-        try {
-          await _cm.connect(e.peripheral);
-        } catch (err) {
-          print('VIBRO-BLE-CLIENT: connect() error: $err');
-          _alertChar = null;
-          _updateStatus(PhoneBleStatus.disconnected);
-          if (_shouldConnect) {
-            _retryTimer = Timer(const Duration(seconds: 4), _doScan);
-          }
-        }
+      if (name == kVibroDeviceLocalName || hasService) {
+        final id = e.peripheral.uuid.toString();
+        _discovered[id] = DiscoveredVibroDevice(
+          peripheral: e.peripheral,
+          name: name.isNotEmpty ? name : kVibroDeviceLocalName,
+          rssi: e.rssi,
+        );
+        _discoveredCtrl.add(_discovered.values.toList());
+        print('VIBRO-CLIENT: Found → $name (RSSI: ${e.rssi})');
       }
     });
 
-    _cm.startDiscovery(serviceUUIDs: [_kServiceUUID]).catchError((_) {
-      // Wider scan if service-filtered fails
+    await _cm.startDiscovery(serviceUUIDs: [kVibroServiceUUID]).catchError((_) {
       _cm.startDiscovery().catchError((_) {});
     });
 
-    // Auto-retry scan after 12s if still not found
-    _retryTimer?.cancel();
-    _retryTimer = Timer(const Duration(seconds: 12), () {
-      if (_status == PhoneBleStatus.scanning && _shouldConnect) {
-        _cm.stopDiscovery().ignore();
-        _doScan();
-      }
-    });
+    // Auto-stop scan after 15s
+    _scanStopTimer?.cancel();
+    _scanStopTimer = Timer(const Duration(seconds: 15), stopScan);
   }
 
-  // ── Discover alert characteristic ─────────────────────────────────────────
-  Future<void> _discoverAlertChar(Peripheral peripheral) async {
+  // ── Stop scanning ──────────────────────────────────────────────────────────
+  Future<void> stopScan() async {
+    _discoverySub?.cancel();
+    _scanStopTimer?.cancel();
+    try { await _cm.stopDiscovery(); } catch (_) {}
+    if (_status == PhoneBleStatus.scanning) {
+      _updateStatus(PhoneBleStatus.idle);
+    }
+  }
+
+  // ── Connect to a specific discovered device ────────────────────────────────
+  Future<void> connectTo(DiscoveredVibroDevice device) async {
+    await stopScan();
+    _updateStatus(PhoneBleStatus.connecting);
+    _pairedDeviceName = device.name;
+    print('VIBRO-CLIENT: Connecting to ${device.name}...');
+
+    // Track connection state
+    _connSub?.cancel();
+    _connSub = _cm.connectionStateChanged.listen((e) async {
+      if (e.state == ConnectionState.connected &&
+          e.peripheral.uuid == device.peripheral.uuid) {
+        _pairedPeripheral = e.peripheral;
+        _updateStatus(PhoneBleStatus.paired);
+        await _subscribeToAlerts(e.peripheral);
+        print('VIBRO-CLIENT: Paired ✓');
+      } else if (e.state == ConnectionState.disconnected &&
+          e.peripheral.uuid == device.peripheral.uuid) {
+        _pairedPeripheral = null;
+        _updateStatus(PhoneBleStatus.disconnected);
+        print('VIBRO-CLIENT: Disconnected');
+      }
+    });
+
+    try {
+      await _cm.connect(device.peripheral);
+    } catch (e) {
+      print('VIBRO-CLIENT: connect() error: $e');
+      _updateStatus(PhoneBleStatus.disconnected);
+    }
+  }
+
+  // ── Subscribe to alert characteristic (NOTIFY) ────────────────────────────
+  Future<void> _subscribeToAlerts(Peripheral peripheral) async {
     try {
       await _cm.requestMTU(peripheral, mtu: 247);
     } catch (_) {}
 
     try {
       final services = await _cm.discoverGATT(peripheral);
+      GATTCharacteristic? alertChar;
+
       for (final svc in services) {
         if (svc.uuid.toString().toLowerCase() ==
-            _kServiceUUID.toString().toLowerCase()) {
+            kVibroServiceUUID.toString().toLowerCase()) {
           for (final c in svc.characteristics) {
             if (c.uuid.toString().toLowerCase() ==
-                _kAlertCharUUID.toString().toLowerCase()) {
-              _alertChar = c;
-              print('VIBRO-BLE-CLIENT: Alert characteristic found ✓');
-              return;
+                kVibroAlertCharUUID.toString().toLowerCase()) {
+              alertChar = c;
+              break;
             }
           }
         }
       }
-      print('VIBRO-BLE-CLIENT: ⚠️ Alert characteristic not found');
-    } catch (e) {
-      print('VIBRO-BLE-CLIENT: GATT discovery error: $e');
-    }
-  }
 
-  // ── Send alert to Deaf phone ───────────────────────────────────────────────
-  Future<bool> sendAlert(PhoneAlertPayload payload) async {
-    final phone = _deafPhone;
-    final char = _alertChar;
-    if (phone == null || char == null || _status != PhoneBleStatus.paired) {
-      print('VIBRO-BLE-CLIENT: Not paired — cannot send alert');
-      return false;
-    }
-    try {
-      await _cm.writeCharacteristic(
-        phone,
-        char,
-        value: payload.encode(),
-        type: GATTCharacteristicWriteType.withResponse,
+      if (alertChar == null) {
+        print('VIBRO-CLIENT: Alert char not found');
+        return;
+      }
+
+      // Enable NOTIFY
+      await _cm.setCharacteristicNotifyState(
+        peripheral,
+        alertChar,
+        state: true,
       );
-      print('VIBRO-BLE-CLIENT: ✅ Alert sent → ${utf8.decode(payload.encode())}');
-      return true;
+
+      // Listen for notifications
+      _notifySub?.cancel();
+      _notifySub = _cm.characteristicNotified.listen((e) {
+        if (e.peripheral.uuid == peripheral.uuid &&
+            e.characteristic.uuid.toString().toLowerCase() ==
+                kVibroAlertCharUUID.toString().toLowerCase()) {
+          final payload = PhoneAlertPayload.decode(e.value);
+          if (payload != null) {
+            print('VIBRO-CLIENT: ✅ Alert received → ${utf8.decode(e.value)}');
+            _alertCtrl.add(payload);
+          }
+        }
+      });
+
+      print('VIBRO-CLIENT: Subscribed to alerts ✓');
     } catch (e) {
-      print('VIBRO-BLE-CLIENT: Write failed: $e');
-      return false;
+      print('VIBRO-CLIENT: GATT discovery/subscribe error: $e');
     }
   }
 
-  // ── Stop ──────────────────────────────────────────────────────────────────
-  Future<void> stopScanning() async {
-    _shouldConnect = false;
-    _retryTimer?.cancel();
-    _discoverySub?.cancel();
-    try { await _cm.stopDiscovery(); } catch (_) {}
-    if (_deafPhone != null) {
-      try { await _cm.disconnect(_deafPhone!); } catch (_) {}
+  // ── Disconnect ─────────────────────────────────────────────────────────────
+  Future<void> disconnect() async {
+    _notifySub?.cancel();
+    _connSub?.cancel();
+    if (_pairedPeripheral != null) {
+      try { await _cm.disconnect(_pairedPeripheral!); } catch (_) {}
     }
-    _alertChar = null;
-    _deafPhone = null;
+    _pairedPeripheral = null;
+    _pairedDeviceName = '';
     _updateStatus(PhoneBleStatus.idle);
   }
 
@@ -349,8 +401,11 @@ class ConnectedPhoneBleClient {
   }
 
   void dispose() {
-    stopScanning();
+    disconnect();
+    stopScan();
     _stateSub?.cancel();
     _statusCtrl.close();
+    _discoveredCtrl.close();
+    _alertCtrl.close();
   }
 }

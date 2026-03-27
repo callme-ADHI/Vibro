@@ -68,7 +68,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     with SingleTickerProviderStateMixin {
   // ── Services ──────────────────────────────────────────────────────────────
   final RecognitionService _recognition = RecognitionService.instance;
-  final ConnectedPhoneBleClient _ble = ConnectedPhoneBleClient.instance;
+  final ConnectedPhoneBleServer _ble = ConnectedPhoneBleServer.instance;
 
   // ── State ─────────────────────────────────────────────────────────────────
   RecognitionState _recState = RecognitionState.IDLE;
@@ -144,14 +144,12 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
         .toSet();
   }
 
-  // ── BLE Pairing ──────────────────────────────────────────────────────────
+  // ── BLE Advertising toggle ──────────────────────────────────────────────
   void _toggleBle() {
-    if (_bleStatus == PhoneBleStatus.paired ||
-        _bleStatus == PhoneBleStatus.scanning ||
-        _bleStatus == PhoneBleStatus.connecting) {
-      _ble.stopScanning();
+    if (_bleStatus == PhoneBleStatus.advertising || _bleStatus == PhoneBleStatus.paired) {
+      _ble.stopAdvertising();
     } else {
-      _ble.startScanning();
+      _ble.startAdvertising();
     }
   }
 
@@ -170,9 +168,9 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
           error: true);
       return;
     }
-    if (_bleStatus != PhoneBleStatus.paired) {
-      _showSnack('Connect to the Deaf phone via BLE first to send alerts.',
-          error: false);
+    // Auto-ensure advertising so Deaf phone can connect
+    if (_bleStatus == PhoneBleStatus.idle || _bleStatus == PhoneBleStatus.unsupported) {
+      _ble.startAdvertising();
     }
     final initialized = await _recognition.initialize(_allNameLabels);
     if (!initialized) {
@@ -307,7 +305,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     _detectionSub?.cancel();
     _stateSub?.cancel();
     _bleSub?.cancel();
-    _ble.stopScanning();
+    _ble.stopAdvertising();
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -401,7 +399,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   Color get _bleBadgeColor {
     switch (_bleStatus) {
       case PhoneBleStatus.paired: return AppColors.success;
-      case PhoneBleStatus.scanning:
+      case PhoneBleStatus.advertising: return AppColors.accentNavy;
       case PhoneBleStatus.connecting: return AppColors.warning;
       default: return AppColors.textSecondary;
     }
@@ -410,7 +408,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   IconData get _bleIcon {
     switch (_bleStatus) {
       case PhoneBleStatus.paired: return Icons.bluetooth_connected_rounded;
-      case PhoneBleStatus.scanning:
+      case PhoneBleStatus.advertising: return Icons.bluetooth_searching_rounded;
       case PhoneBleStatus.connecting: return Icons.bluetooth_searching_rounded;
       default: return Icons.bluetooth_rounded;
     }
@@ -419,7 +417,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   String get _bleLabel {
     switch (_bleStatus) {
       case PhoneBleStatus.paired: return 'PAIRED';
-      case PhoneBleStatus.scanning: return 'SCANNING';
+      case PhoneBleStatus.advertising: return 'ADVERTISING';
       case PhoneBleStatus.connecting: return 'PAIRING';
       default: return 'PAIR';
     }
@@ -473,7 +471,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
 
   // ── BLE status banner ────────────────────────────────────────────────────
   Widget _buildBleBanner() {
-    final isSearching = _bleStatus == PhoneBleStatus.scanning ||
+    final isSearching = _bleStatus == PhoneBleStatus.advertising ||
         _bleStatus == PhoneBleStatus.connecting;
 
     return GestureDetector(
@@ -497,8 +495,8 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
           Expanded(
             child: Text(
               isSearching
-                  ? 'Searching for Deaf phone... Tap to cancel'
-                  : 'Tap to pair with Deaf phone via Bluetooth',
+                  ? 'Advertising. Waiting for Deaf device to connect...'
+                  : 'Tap to start advertising via Bluetooth',
               style: AppTypography.metadata(
                   color: isSearching ? AppColors.warning : AppColors.primaryNavy)
                   .copyWith(fontWeight: FontWeight.w600),
