@@ -99,6 +99,8 @@ void onStart(ServiceInstance service) async {
   // Fetch location mapping
   Map<String, List<String>> nameToLocMap = await locationService.getNameToLocationMap();
   List<Map<String, dynamic>> allLocations = await locationService.getLocations();
+  bool isAutoLocation = true;
+  String? selectedLocationId;
 
   if (names.isEmpty) {
     service.stopSelf();
@@ -117,25 +119,61 @@ void onStart(ServiceInstance service) async {
   // 4. Listen for detection events
   recognition.detectionStream.listen((event) async {
     // LOCATION FILTERING LOGIC
-    final mappedLocs = nameToLocMap[event.name];
-    if (mappedLocs != null && mappedLocs.isNotEmpty) {
-      print('DEBUG BG: "${event.name}" is location-restricted: $mappedLocs');
-      
-      // Get current location
-      final Position? currentPos = await locationService.getCurrentPosition();
-      if (currentPos == null) {
-        print('DEBUG BG: Could not get location, suppressing restricted name');
-        return; 
+    final detectedName = event.name;
+    bool shouldNotify = false;
+
+    // 1. Check if the name has any location restrictions
+    final allowedLocations = nameToLocMap[detectedName];
+
+    if (allowedLocations == null || allowedLocations.isEmpty) {
+      // This name is set to "Always" (no location restrictions)
+      print('DEBUG BG: "$detectedName" is set to ALWAYS trigger');
+      shouldNotify = true;
+    } else {
+      print('DEBUG BG: "$detectedName" is location-restricted: $allowedLocations');
+
+      // 2. Determine active location for filtering
+      String? activeLocId;
+      if (isAutoLocation) {
+        final pos = await locationService.getCurrentPosition();
+        if (pos != null) {
+          final activeLoc = await locationService.findActiveLocation(pos, allLocations);
+          final generalLoc = allLocations.firstWhere((l) => l['location_name'] == LocationService.generalName, orElse: () => {});
+          final generalId = generalLoc['id'] as String?;
+          
+          activeLocId = activeLoc?['id'] as String? ?? generalId;
+          
+          if (activeLocId != null && activeLocId == generalId) {
+            print('DEBUG BG: Auto-sensing matched NO location. Using General Mode.');
+          } else if (activeLocId != null) {
+            print('DEBUG BG: Auto-location detected: ${activeLoc?['location_name']} (ID: $activeLocId)');
+          }
+        }
+ else {
+          print('DEBUG BG: Could not get current position for auto-location.');
+        }
+      } else {
+        // Manual Mode
+        if (selectedLocationId == '__all__' || selectedLocationId == null) {
+          // If "All names" is manually selected, we don't filter by location
+          print('DEBUG BG: Manual "All Names" selected. Bypassing location filter.');
+          shouldNotify = true; 
+        } else {
+          activeLocId = selectedLocationId;
+          print('DEBUG BG: Manual location selected: $activeLocId');
+        }
       }
 
-      final activeLoc = locationService.findActiveLocation(currentPos, allLocations);
-      if (activeLoc == null || !mappedLocs.contains(activeLoc['id'])) {
-        print('DEBUG BG: Not in required location for "${event.name}". (Active: ${activeLoc?['location_name']})');
-        return; // Suppress
+      if (!shouldNotify && activeLocId != null && allowedLocations.contains(activeLocId)) {
+        // User is currently in one of the allowed locations for this name
+        print('DEBUG BG: Location MATCH for "$detectedName" at $activeLocId');
+        shouldNotify = true;
       }
-      print('DEBUG BG: Location MATCH for "${event.name}" at ${activeLoc['location_name']}');
-    } else {
-      print('DEBUG BG: "${event.name}" is set to ALWAYS trigger');
+    }
+
+    if (!shouldNotify) {
+      print('DEBUG BG: Suppressing "$detectedName" due to location restrictions.');
+      return; // Suppress the detection
     }
 
     // Start/Reset notification captioning window
@@ -177,16 +215,17 @@ void onStart(ServiceInstance service) async {
   // 5. Remote control listeners
   service.on('updateNames').listen((event) async {
     if (event != null && event['names'] is List) {
-      final List namesList = event['names'] as List;
-      final newNames = namesList.map((e) => e.toString().toLowerCase()).toSet();
-      print('DEBUG BG: Updating names to: $newNames');
+      final names = List<String>.from(event['names']);
+      isAutoLocation = event['isAutoLocation'] as bool? ?? true;
+      selectedLocationId = event['selectedLocationId'] as String?;
+      print('DEBUG BG: Updating names to: $names');
+      print('DEBUG BG: isAutoLocation: $isAutoLocation, selectedLocationId: $selectedLocationId');
+      
+      await recognition.updateLabels(names);
       
       // Refresh location mapping cache
       nameToLocMap = await locationService.getNameToLocationMap();
       allLocations = await locationService.getLocations();
-      
-      await recognition.initialize(newNames);
-      recognition.startListening();
     }
   });
 

@@ -86,6 +86,12 @@ class RecognitionService {
     }
   }
 
+  /// 🛠 Update active names without full re-initialization
+  Future<void> updateLabels(List<String> labels) async {
+    _activeNames = labels.map((e) => e.toLowerCase()).toSet();
+    print('DEBUG ASR: Updated active names to: $_activeNames');
+  }
+
   // 2️⃣ START LISTENING (Controlled Entry)
   void startListening() {
     print('DEBUG: User requested START listening');

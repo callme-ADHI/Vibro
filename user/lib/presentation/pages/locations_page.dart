@@ -34,13 +34,18 @@ class _LocationsPageState extends State<LocationsPage> {
   final Map<String, List<String>> _namesPerLocation = {};
   List<Map<String, dynamic>> _allNames = [];
   bool _isLoading = true;
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initAndLoad();
     _goToCurrentLocation(silent: true);
+  }
+
+  Future<void> _initAndLoad() async {
+    await _locationService.ensureGeneralLocation();
+    await _loadData();
+    _checkInitialPrompt();
   }
 
   Future<void> _loadData() async {
@@ -57,8 +62,19 @@ class _LocationsPageState extends State<LocationsPage> {
       }
 
       if (mounted) {
+        // Ensure "General Mode" is ALWAYS in the list even if DB insert was blocked
+        bool hasGeneral = locations.any((l) => l['location_name'] == LocationService.generalName);
+        final finalLocations = List<Map<String, dynamic>>.from(locations);
+        if (!hasGeneral) {
+           finalLocations.insert(0, {
+             'id': 'virtual_general', // Temporary ID
+             'location_name': LocationService.generalName,
+             'radius': 0.0,
+           });
+        }
+
         setState(() {
-          _locations = locations;
+          _locations = finalLocations;
           _namesPerLocation.clear();
           _namesPerLocation.addAll(namesPerLoc);
           _allNames = names;
@@ -69,9 +85,55 @@ class _LocationsPageState extends State<LocationsPage> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = e.toString().replaceFirst('Exception: ', '');
         });
       }
+    }
+  }
+
+  Future<void> _checkInitialPrompt() async {
+    // Look for General Mode location
+    final general = _locations.where((l) => l['location_name'] == LocationService.generalName).toList();
+    if (general.isEmpty) return;
+    
+    final generalId = general.first['id'] as String;
+    
+    // If only General Mode exists AND it has no names, prompt user
+    final onlyGeneral = _locations.length == 1;
+    if (onlyGeneral && (_namesPerLocation[generalId]?.isEmpty ?? true)) {
+      if (_allNames.isNotEmpty) {
+        _showInitialGeneralPrompt(generalId);
+      }
+    }
+  }
+
+  Future<void> _showInitialGeneralPrompt(String generalId) async {
+    final firstName = _allNames.first;
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Setup General Mode'),
+        content: Text('Vibro uses "General Mode" when you are in a location you haven\'t configured.\n\nShould we start by adding "${firstName['name_label']}" to your General names?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, sounds good')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Later')),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      if (generalId == 'virtual_general') {
+        try {
+          await _locationService.ensureGeneralLocation();
+          final realId = await _locationService.getGeneralLocationId();
+          if (realId != null) {
+            await _locationService.setNamesForLocation(realId, [firstName['id'] as String]);
+          }
+        } catch (_) {}
+      } else {
+        await _locationService.setNamesForLocation(generalId, [firstName['id'] as String]);
+      }
+      _loadData();
     }
   }
 
@@ -184,7 +246,24 @@ class _LocationsPageState extends State<LocationsPage> {
     );
 
     if (result != null) {
-      await _locationService.setNamesForLocation(locId, result.toList());
+      if (locId == 'virtual_general') {
+        // Must create it first to get a real ID
+        try {
+          await _locationService.ensureGeneralLocation();
+          final realId = await _locationService.getGeneralLocationId();
+          if (realId != null) {
+            await _locationService.setNamesForLocation(realId, result.toList());
+          } else {
+            throw Exception('Could not create General Mode in database.');
+          }
+        } catch (e) {
+             if (mounted) {
+               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+             }
+        }
+      } else {
+        await _locationService.setNamesForLocation(locId, result.toList());
+      }
       _loadData();
     }
   }
@@ -353,26 +432,36 @@ class _LocationsPageState extends State<LocationsPage> {
         final name = loc['location_name'] as String? ?? '';
         final names = _namesPerLocation[id] ?? [];
         final namesStr = names.isEmpty ? 'No names assigned' : names.join(', ');
+        
+        final isGeneral = name == LocationService.generalName;
 
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isGeneral ? const Color(0xFFF0F4FF) : Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: isGeneral ? AppColors.primaryNavy.withValues(alpha: 0.1) : AppColors.divider),
           ),
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFFE8EAF6),
-              child: Icon(Icons.location_on, color: AppColors.primaryNavy, size: 20),
+            leading: CircleAvatar(
+              backgroundColor: isGeneral ? AppColors.primaryNavy.withValues(alpha: 0.1) : const Color(0xFFE8EAF6),
+              child: Icon(
+                isGeneral ? Icons.public : Icons.location_on, 
+                color: AppColors.primaryNavy, 
+                size: 20
+              ),
             ),
-            title: Text(name, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.bold)),
+            title: Text(
+              isGeneral ? 'General Mode (Fallback)' : name, 
+              style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.bold)
+            ),
             subtitle: Text(namesStr, style: AppTypography.bodySmall(color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(icon: const Icon(Icons.edit_outlined, size: 20), onPressed: () => _editNames(loc)),
-                IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.error), onPressed: () => _deleteLocation(loc)),
+                if (!isGeneral) 
+                  IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.error), onPressed: () => _deleteLocation(loc)),
               ],
             ),
             onTap: () => _editNames(loc),

@@ -51,6 +51,7 @@ class _ListeningPageState extends State<ListeningPage>
 
   List<Map<String, dynamic>> _locations = [];
   String? _selectedLocationId;
+  bool _isAutoLocation = true; // NEW: Auto-sensing toggle
   static const String _allNamesId = '__all__';
 
   late final AnimationController _pulseCtrl;
@@ -135,8 +136,24 @@ class _ListeningPageState extends State<ListeningPage>
     if (!silent) setState(() => _isLoading = true);
     try {
       final locations = await _locationService.getLocations();
-      List<String> namesData;
+      
+      // AUTO-SENSING LOGIC
+      if (_isAutoLocation) {
+        final pos = await _locationService.getCurrentPosition();
+        if (pos != null) {
+          final activeLoc = await _locationService.findActiveLocation(pos, locations);
+          final generalLoc = locations.firstWhere((l) => l['location_name'] == LocationService.generalName, orElse: () => {});
+          final generalId = generalLoc['id'] as String?;
+          
+          final newId = activeLoc?['id'] as String? ?? generalId ?? _allNamesId;
+          if (newId != _selectedLocationId) {
+            _selectedLocationId = newId;
+            _selectedNames.clear(); 
+          }
+        }
+      }
 
+      List<String> namesData;
       if (_selectedLocationId == null || _selectedLocationId == _allNamesId) {
         final rawNames = await _nameService.getNames();
         namesData = rawNames
@@ -171,7 +188,11 @@ class _ListeningPageState extends State<ListeningPage>
       
       // Update background service with names if it's already running
       if (await FlutterBackgroundService().isRunning()) {
-        FlutterBackgroundService().invoke('updateNames', {'names': _selectedNames.toList()});
+        FlutterBackgroundService().invoke('updateNames', {
+          'names': _selectedNames.toList(),
+          'isAutoLocation': _isAutoLocation,
+          'selectedLocationId': _selectedLocationId,
+        });
       }
     } catch (e) {
       if (mounted && !silent) {
@@ -444,18 +465,32 @@ class _ListeningPageState extends State<ListeningPage>
                 style: AppTypography.bodySmall(color: AppColors.textSecondary),
               ),
               const Spacer(),
-              TextButton.icon(
-                onPressed: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LocationsPage()),
-                  );
-                  _loadNamesAndInit();
-                },
-                icon: const Icon(Icons.settings_rounded, size: 16),
-                label: const Text('Manage'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.accentNavy,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+              // AUTO-SENSING TOGGLE
+              Text(
+                'Auto-detect',
+                style: AppTypography.bodySmall(
+                  color: _isAutoLocation ? AppColors.primaryNavy : AppColors.textSecondary,
+                ).copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                height: 24,
+                width: 44,
+                child: Switch(
+                  value: _isAutoLocation,
+                  onChanged: (v) {
+                    setState(() {
+                      _isAutoLocation = v;
+                      if (!v) {
+                        _selectedLocationId = _allNamesId;
+                        _selectedNames.clear(); // FORCE REFRESH TO ALL
+                      }
+                    });
+                    _loadNamesAndInit();
+                  },
+                  activeColor: AppColors.primaryNavy,
+                  activeTrackColor: AppColors.primaryNavy.withValues(alpha: 0.3),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
             ],
@@ -473,7 +508,7 @@ class _ListeningPageState extends State<ListeningPage>
                     child: FilterChip(
                       label: Text(e.value),
                       selected: isSelected,
-                      onSelected: (_) => _onLocationChanged(e.key),
+                      onSelected: _isAutoLocation ? null : (_) => _onLocationChanged(e.key),
                       backgroundColor: AppColors.white,
                       selectedColor: AppColors.primaryNavy.withValues(alpha: 0.2),
                       checkmarkColor: AppColors.primaryNavy,

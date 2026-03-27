@@ -12,6 +12,8 @@ class LocationService {
   String? get _userId => _client.auth.currentUser?.id;
 
   /// Get all locations for the current user
+  static const String generalName = 'General Mode';
+
   Future<List<Map<String, dynamic>>> getLocations() async {
     if (_userId == null) throw Exception('Not authenticated');
 
@@ -19,9 +21,50 @@ class LocationService {
         .from('locations')
         .select()
         .eq('user_id', _userId!)
-        .order('created_at', ascending: false);
+        .order('created_at');
+    
+    final List<Map<String, dynamic>> list = List<Map<String, dynamic>>.from(response);
+    
+    // Sort "General Mode" to the top if exists
+    list.sort((a, b) {
+      if (a['location_name'] == generalName) return -1;
+      if (b['location_name'] == generalName) return 1;
+      return 0;
+    });
 
-    return List<Map<String, dynamic>>.from(response);
+    return list;
+  }
+
+  Future<void> ensureGeneralLocation() async {
+    if (_userId == null) return;
+    try {
+      final existing = await _client
+          .from('locations')
+          .select()
+          .eq('user_id', _userId!)
+          .eq('location_name', generalName)
+          .maybeSingle();
+
+      if (existing == null) {
+        await _client.from('locations').insert({
+          'location_name': generalName,
+          'radius': 0.0,
+          'user_id': _userId!,
+          'latitude': 0.0,
+          'longitude': 0.0,
+        });
+      }
+    } catch (e) {
+      print('Error ensuring General Location: $e');
+    }
+  }
+
+  // Helper to find the general location ID dynamically
+  Future<String?> getGeneralLocationId() async {
+    if (_userId == null) return null;
+    final locs = await getLocations();
+    final general = locs.firstWhere((l) => l['location_name'] == generalName, orElse: () => {});
+    return general['id'] as String?;
   }
 
   /// Create a new location (max 3)
