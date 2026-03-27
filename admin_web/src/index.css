@@ -1,21 +1,21 @@
-/* Premium Dark Global Aesthetics */
+/* Vibro Enterprise: Minimal White & Navy AEC */
 :root {
-  --color-bg: #0A1F44; /* Deep Navy */
-  --color-surface: #122854;
-  --color-surface-hover: #193466;
-  --color-primary: #2E5BFF; /* Steel Blue */
-  --color-primary-hover: #406bff;
-  --color-text: #F5F7FA; /* Platinum White */
-  --color-text-muted: #B8C2D1; /* Silver Gray */
-  --color-border: #1A305D;
-  --color-success: #1CC482;
-  --color-danger: #E03E52;
-  --color-warning: #F5B04A;
+  --color-bg: #F4F6F9; /* Light Surface */
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #F9FAFB;
+  --color-primary: #0B1F3B; /* Primary Navy */
+  --color-primary-hover: #123A6F; /* Accent Navy */
+  --color-text: #111827; /* Text Primary */
+  --color-text-muted: #6B7280; /* Text Secondary */
+  --color-border: #E5E7EB; /* Divider */
+  --color-success: #16A34A;
+  --color-danger: #DC2626;
+  --color-warning: #F59E0B;
 
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -141,8 +141,8 @@ input:focus, select:focus, textarea:focus {
 
 .sidebar {
   width: 260px;
-  background-color: var(--color-surface);
-  border-right: 1px solid var(--color-border);
+  background-color: var(--color-primary);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -187,9 +187,9 @@ input:focus, select:focus, textarea:focus {
 }
 
 .nav-item.active {
-  background-color: rgba(46, 91, 255, 0.15);
-  color: var(--color-primary);
-  border-left: 3px solid var(--color-primary);
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-left: 3px solid white;
 }
 
 .main-content {
@@ -203,7 +203,7 @@ input:focus, select:focus, textarea:focus {
 .topbar {
   height: 70px;
   border-bottom: 1px solid var(--color-border);
-  background-color: rgba(10, 31, 68, 0.8);
+  background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(8px);
   position: sticky;
   top: 0;
@@ -293,7 +293,8 @@ tr:hover td {
 .login-logo h1 {
   margin: 0;
   font-size: 2.5rem;
-  background: linear-gradient(135deg, #fff, #B8C2D1);
+  background: linear-gradient(135deg, var(--color-primary), #1a43d6);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
