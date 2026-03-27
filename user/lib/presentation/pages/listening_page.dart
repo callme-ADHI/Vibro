@@ -11,10 +11,12 @@ import '../../core/services/name_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/history_service.dart';
 import '../../core/services/kws_service.dart'; // DetectionEvent
-import '../../core/services/ble_service.dart'; // BLE Integration
+import '../../core/services/ble_service.dart'; // BLE (ESP32)
+import '../../core/services/phone_ble_service.dart'; // Phone-to-phone BLE
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'locations_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ListeningPage extends StatefulWidget {
   const ListeningPage({super.key});
@@ -29,7 +31,8 @@ class _ListeningPageState extends State<ListeningPage>
   final NameService _nameService = NameService.instance;
   final LocationService _locationService = LocationService.instance;
   final BleService _bleService = BleService.instance;
-  
+  final DeafPhoneBleClient _phoneBle = DeafPhoneBleClient.instance;  // BLE server
+
   // State from Service
   RecognitionState _recState = RecognitionState.IDLE;
   bool get _isListening => _recState == RecognitionState.LISTENING || 
@@ -43,7 +46,13 @@ class _ListeningPageState extends State<ListeningPage>
   StreamSubscription<DetectionEvent>? _detectionSub;
   StreamSubscription<RecognitionState>? _stateSub;
   StreamSubscription? _bleSub;
+  StreamSubscription<PhoneAlertPayload>? _phoneBleAlertSub;
+  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
   Timer? _refreshTimer;
+  RealtimeChannel? _alertChannel;
+
+  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
+  bool get _isPhonePaired => _phoneBleStatus == PhoneBleStatus.paired;
   
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
@@ -76,6 +85,18 @@ class _ListeningPageState extends State<ListeningPage>
     // Auto-refresh every 5s
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
 
+    // Start phone-to-phone BLE advertising (Deaf phone is always the server)
+    _phoneBle.disconnect(); // client does not advertise
+    _phoneBleStatusSub = _phoneBle.statusStream.listen((s) {
+      if (!mounted) return;
+      setState(() => _phoneBleStatus = s);
+    });
+    _phoneBleAlertSub = _phoneBle.alertStream.listen((payload) {
+      if (!mounted) return;
+      _onPhoneBleAlert(payload);
+    });
+    _phoneBleStatus = _phoneBle.status;
+
     // BLE Init
     _bleService.initialize();
     _bleSub = _bleService.statusStream.listen((status) {
@@ -106,6 +127,7 @@ class _ListeningPageState extends State<ListeningPage>
         timestamp: DateTime.now(),
       );
 
+
       setState(() {
         _detections.insert(0, detEvent);
         if (_detections.length > 50) _detections.removeLast();
@@ -130,6 +152,112 @@ class _ListeningPageState extends State<ListeningPage>
         });
       }
     });
+
+    // Listen for relation_alerts from Connected users (real-time DB fallback)
+    _subscribeToRelationAlerts();
+  }
+
+  // ── Phone BLE Alert handler (primary path) ────────────────────────────────
+  Future<void> _onPhoneBleAlert(PhoneAlertPayload payload) async {
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 500, 150, 500]);
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+    if (_isBleConnected) _bleService.blinkLed();
+
+    await _notifications.show(
+      2,
+      '📣 ${payload.label} called you!',
+      'They said "${payload.name}" via Bluetooth',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'vibro_ble_alerts', 'BLE Alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+      ),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(children: [
+          const Icon(Icons.bluetooth_rounded, color: AppColors.white, size: 16),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            '${payload.label} called you! ("${payload.name}" · ${(payload.confidence * 100).toInt()}%)',
+            style: AppTypography.bodyMedium(color: AppColors.white),
+          )),
+        ]),
+        backgroundColor: AppColors.primaryNavy,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  void _subscribeToRelationAlerts() {
+    final me = Supabase.instance.client.auth.currentUser;
+    if (me == null) return;
+    _alertChannel = Supabase.instance.client
+        .channel('relation_alerts_${me.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'relation_alerts',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'deaf_user_id',
+            value: me.id,
+          ),
+          callback: (payload) {
+            if (!mounted) return;
+            final data = payload.newRecord;
+            final label = data['relation_label'] as String? ?? 'Someone';
+            final modelName = data['model_name'] as String? ?? 'a name';
+            _onRelationAlert(label, modelName);
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _onRelationAlert(String label, String modelName) async {
+    // Vibrate
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 400, 200, 400]);
+    } else {
+      HapticFeedback.heavyImpact();
+    }
+    // BLE flash
+    if (_isBleConnected) _bleService.blinkLed();
+
+    // Notification to deaf user
+    const androidDetails = AndroidNotificationDetails(
+      'vibro_relation_alerts',
+      'Caregiver Alerts',
+      channelDescription: 'Alerts from connected caregivers',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    await _notifications.show(
+      1,
+      '📣 $label called you!',
+      'They said "$modelName" — tap to respond',
+      const NotificationDetails(android: androidDetails),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('$label called you! ("$modelName")',
+            style: AppTypography.bodyMedium(color: AppColors.white)),
+        backgroundColor: AppColors.primaryNavy,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+>>>>>>> origin/adhi
   }
 
   Future<void> _loadNamesAndInit({bool silent = false}) async {
@@ -302,6 +430,10 @@ class _ListeningPageState extends State<ListeningPage>
     _detectionSub?.cancel();
     _stateSub?.cancel();
     _bleSub?.cancel();
+    _phoneBleAlertSub?.cancel();
+    _phoneBleStatusSub?.cancel();
+    _alertChannel?.unsubscribe();
+    _phoneBle.disconnect();
     _pulseCtrl.dispose();
     super.dispose();
   }

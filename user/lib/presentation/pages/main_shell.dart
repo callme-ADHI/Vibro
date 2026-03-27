@@ -9,6 +9,8 @@ import 'listening_page.dart';
 import 'live_captions_page.dart';
 import 'connectivity_page.dart';
 import 'settings_page.dart';
+import 'connections_page.dart';
+import 'profile_page.dart';
 
 class MainShell extends StatefulWidget {
   final int initialIndex;

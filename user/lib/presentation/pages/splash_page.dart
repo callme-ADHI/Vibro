@@ -6,8 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/constants/app_constants.dart';
-import 'login_page.dart';
+import '../../features/auth/screens/login_screen.dart';
 import 'main_shell.dart';
+import 'connected/connected_main_shell.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -48,7 +49,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     });
   }
 
-  void _navigateToNextScreen() {
+  Future<void> _navigateToNextScreen() async {
     // Reset to light status bar for rest of app
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -59,13 +60,25 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
 
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainShell(initialIndex: 0)),
-      );
+      String userType = 'deaf';
+      try {
+        final profile = await Supabase.instance.client.from('profiles').select('user_type').eq('id', user.id).maybeSingle();
+        if (profile != null) {
+          userType = profile['user_type'] ?? 'deaf';
+        }
+      } catch (_) {}
+
+      if (mounted) {
+         if (userType == 'connected') {
+           Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const ConnectedMainShell()));
+         } else {
+           Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell(initialIndex: 0)));
+         }
+      }
     } else {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-      );
+      if (mounted) {
+         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+      }
     }
   }
 

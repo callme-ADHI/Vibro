@@ -7,7 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/location_service.dart';
-import 'login_page.dart';
+import '../../features/auth/screens/login_screen.dart';
 import 'locations_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -81,7 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) {
       setState(() {
         _email = user?.email ?? '';
-        _username = profile?['username'] ?? '';
+        _username = profile?['full_name'] ?? '';
       });
     }
   }
@@ -97,7 +97,7 @@ class _SettingsPageState extends State<SettingsPage> {
           backgroundColor: AppColors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: Text(
-            'Edit Username',
+            'Edit Name',
             style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
           ),
           content: TextField(
@@ -139,7 +139,7 @@ class _SettingsPageState extends State<SettingsPage> {
               onPressed: () {
                 final trimmed = controller.text.trim();
                 if (trimmed.isEmpty) {
-                  setDialogState(() => errorText = 'Username cannot be empty');
+                  setDialogState(() => errorText = 'Name cannot be empty');
                   return;
                 }
                 Navigator.of(ctx).pop(trimmed);
@@ -161,7 +161,7 @@ class _SettingsPageState extends State<SettingsPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Username updated to "$newName"'),
+              content: Text('Name updated to "$newName"'),
               backgroundColor: AppColors.success,
               behavior: SnackBarBehavior.floating,
             ),
@@ -236,7 +236,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _username.isNotEmpty ? _username : 'No username set',
+                          _username.isNotEmpty ? _username : 'No name set',
                           style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(
                             fontWeight: FontWeight.w600,
                             fontSize: 15,
@@ -377,7 +377,7 @@ class _SettingsPageState extends State<SettingsPage> {
       await AuthService.instance.signOut();
       if (context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }

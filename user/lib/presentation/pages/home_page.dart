@@ -1,35 +1,41 @@
 // VIBRO Home Page — White & Navy Enterprise (Tab Content)
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/ble_service.dart';
+import '../../core/services/phone_ble_service.dart';
+import '../../core/providers/user_provider.dart';
 import 'training_status_page.dart';
 import 'locations_page.dart';
 import 'settings_page.dart';
+import 'history_page.dart';
+import 'ble_devices_page.dart';
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  String _userName = 'User';
-  String _userEmail = '';
+class _HomePageState extends ConsumerState<HomePage> {
+  List<Map<String, dynamic>> _recentHistories = [];
   TrainingStatus _trainingStatus = TrainingStatus.notStarted;
   int _trainingProgress = 0;
   int _modelCount = 0;
   int _locationCount = 0;
   int _detectionCount = 0; // Added detection count
-  bool _isBleConnected = false; 
+  bool _isBleConnected = false;
+  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
 
   Timer? _refreshTimer;
   StreamSubscription? _bleSub;
+  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
 
   @override
   void initState() {
@@ -39,41 +45,42 @@ class _HomePageState extends State<HomePage> {
     // Auto refresh every 5s
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadAllData());
 
-    // BLE Status
+    // BLE Status (ESP32)
     _bleSub = BleService.instance.connectionStream.listen((connected) {
        if (mounted) setState(() => _isBleConnected = connected);
     });
-    _isBleConnected = BleService.instance.isConnected; // Initial check
+    _isBleConnected = BleService.instance.isConnected;
+
+    // Phone BLE status (Connected user pairing)
+    _phoneBleStatus = DeafPhoneBleClient.instance.status;
+    _phoneBleStatusSub = DeafPhoneBleClient.instance.statusStream.listen((s) {
+      if (mounted) setState(() => _phoneBleStatus = s);
+    });
   }
   
   void _loadAllData() {
-    _loadUserProfile();
     _loadTrainingStatus();
     _loadLocationCount();
     _loadDetectionCount();
+    _loadRecentHistories();
   }
 
-  Future<void> _loadUserProfile() async {
+  Future<void> _loadRecentHistories() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
-        if (_userEmail != user.email) setState(() => _userEmail = user.email ?? '');
+      if (user == null) return;
 
-        // Only fetch profile if username is default
-        if (_userName == 'User') {
-             final response = await Supabase.instance.client
-                .from('profiles')
-                .select('username')
-                .eq('id', user.id)
-                .maybeSingle();
+      final oneHourAgo = DateTime.now().subtract(const Duration(hours: 1)).toUtc().toIso8601String();
 
-            if (mounted && response != null && response['username'] != null) {
-              setState(() {
-                _userName = response['username'];
-              });
-            }
-        }
-      }
+      final response = await Supabase.instance.client
+          .from('detection_history')
+          .select('detected_label, confidence, created_at')
+          .eq('user_id', user.id)
+          .gte('created_at', oneHourAgo)
+          .order('created_at', ascending: false)
+          .limit(10);
+
+      if (mounted) setState(() => _recentHistories = List<Map<String, dynamic>>.from(response));
     } catch (_) {}
   }
 
@@ -137,6 +144,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final userProfile = ref.watch(userProvider);
+    final String currentName = userProfile?['full_name'] ?? 'Loading...';
+    final String currentEmail = userProfile?['email'] ?? '';
+
     return Scaffold(
       backgroundColor: AppColors.lightSurface,
       appBar: AppBar(
@@ -192,45 +203,36 @@ class _HomePageState extends State<HomePage> {
             _buildCard(
               child: Row(
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryNavy,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        _userName.isNotEmpty ? _userName[0].toUpperCase() : 'U',
-                        style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Welcome back',
-                          style: AppTypography.metadata(color: AppColors.textSecondary),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _userName,
-                          style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
-                        ),
-                        if (_userEmail.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            _userEmail,
-                            style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
+                   Container(
+                     width: 48,
+                     height: 48,
+                     decoration: BoxDecoration(
+                       color: AppColors.primaryNavy,
+                       borderRadius: BorderRadius.circular(12),
+                     ),
+                     child: Center(
+                       child: Text(
+                         currentName.isNotEmpty && currentName != 'Loading...' ? currentName[0].toUpperCase() : 'U',
+                         style: AppTypography.sectionTitle(color: AppColors.white).copyWith(fontSize: 20),
+                       ),
+                     ),
+                   ),
+                   const SizedBox(width: 16),
+                   Expanded(
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       children: [
+                         Text('Welcome back', style: AppTypography.metadata(color: AppColors.textSecondary)),
+                         const SizedBox(height: 2),
+                         Text(currentName, style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18)),
+                         if (currentEmail.isNotEmpty) ...[
+                           const SizedBox(height: 2),
+                           Text(currentEmail, style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 12)),
+                         ],
+                       ],
+                     ),
+                   ),
+                 ],
               ),
             ),
 
@@ -274,11 +276,22 @@ class _HomePageState extends State<HomePage> {
                     statusColor: _locationCount > 0 ? AppColors.success : AppColors.accentNavy,
                   ),
                 ),
-                _buildFeatureCard(
-                  icon: Icons.developer_board_rounded,
-                  title: 'Device',
-                  subtitle: _isBleConnected ? 'Connected' : 'Not Connected',
-                  statusColor: _isBleConnected ? AppColors.success : AppColors.error,
+                GestureDetector(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BleDevicesPage()),
+                  ),
+                  child: _buildFeatureCard(
+                    icon: _phoneBleStatus == PhoneBleStatus.paired
+                        ? Icons.bluetooth_connected_rounded
+                        : Icons.developer_board_rounded,
+                    title: 'Device',
+                    subtitle: _phoneBleStatus == PhoneBleStatus.paired
+                        ? 'BLE Paired'
+                        : _isBleConnected ? 'ESP32 Connected' : 'Tap to pair',
+                    statusColor: _phoneBleStatus == PhoneBleStatus.paired
+                        ? AppColors.success
+                        : _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -295,6 +308,14 @@ class _HomePageState extends State<HomePage> {
                       'ESP32 Device', 
                       _isBleConnected ? 'Online' : 'Offline', 
                       _isBleConnected ? AppColors.success : AppColors.error
+                  ),
+                  const Divider(color: AppColors.divider, height: 1),
+                  _buildStatusRow(
+                      'Phone BLE',
+                      _phoneBleStatus == PhoneBleStatus.paired
+                          ? 'Paired · ${DeafPhoneBleClient.instance.pairedDeviceName}'
+                          : _phoneBleStatus == PhoneBleStatus.scanning ? 'Scanning…' : 'Not paired',
+                      _phoneBleStatus == PhoneBleStatus.paired ? AppColors.success : AppColors.textSecondary,
                   ),
                   const Divider(color: AppColors.divider, height: 1),
                   _buildStatusRow(
@@ -346,6 +367,83 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
+
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildSectionHeader('Recent Detections (Past Hour)'),
+                GestureDetector(
+                  onTap: () {
+                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HistoryPage()));
+                  },
+                  child: Text('View All', style: AppTypography.bodySmall(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_recentHistories.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Center(
+                  child: Text('No detections in the past hour.', style: AppTypography.bodySmall(color: AppColors.textSecondary)),
+                ),
+              )
+            else
+              Column(
+                children: _recentHistories.map((log) {
+                  final String label = (log['detected_label'] ?? 'Unknown').toString();
+                  final double confidence = ((log['confidence'] ?? 0.0) as num).toDouble();
+                  final String timeString = log['created_at'] != null
+                      ? DateTime.parse(log['created_at']).toLocal().toString().split('.').first
+                      : '';
+                  final int pct = (confidence * 100).round();
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.divider),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(color: AppColors.badgeBackground, borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.waves_rounded, color: AppColors.primaryNavy, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(label, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 2),
+                              Text(timeString, style: AppTypography.metadata(color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text('$pct%', style: AppTypography.metadata(color: AppColors.success).copyWith(fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
 
             const SizedBox(height: 16),
           ],

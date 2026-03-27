@@ -1,4 +1,4 @@
-name: vibro
+name: vibro_v6
 description: "VIBRO - AI-Powered Name Detection & Wearable Alert System"
 publish_to: 'none'
 
@@ -26,7 +26,8 @@ dependencies:
   supabase_flutter: ^2.6.0
   
   # BLE Communication
-  flutter_blue_plus: ^1.34.5
+  flutter_blue_plus: ^1.34.5             # ESP32 hardware connection (Central)
+  bluetooth_low_energy: ^6.0.3           # Phone-to-phone BLE (Central + Peripheral)
   
   # Audio Recording & Processing
   record: ^6.1.0
