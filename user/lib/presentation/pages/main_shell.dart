@@ -7,6 +7,7 @@ import 'home_page.dart';
 import 'names_page.dart';
 import 'listening_page.dart';
 import 'live_captions_page.dart';
+import 'connectivity_page.dart';
 import 'settings_page.dart';
 
 class MainShell extends StatefulWidget {
@@ -22,10 +23,10 @@ class _MainShellState extends State<MainShell> {
 
   final List<Widget> _pages = const [
     HomePage(),
-    NamesPage(),
-    ListeningPage(),
     LiveCaptionsPage(),
-    SettingsPage(),
+    ListeningPage(),
+    NamesPage(),
+    ConnectivityPage(),
   ];
 
   @override
@@ -35,8 +36,8 @@ class _MainShellState extends State<MainShell> {
 
     // 1. Listen for background detection events
     FlutterBackgroundService().on('onDetection').listen((event) {
-      if (mounted && _currentIndex != 3) {
-        setState(() => _currentIndex = 3);
+      if (mounted && _currentIndex != 1) {
+        setState(() => _currentIndex = 1);
       }
     });
 
@@ -44,8 +45,8 @@ class _MainShellState extends State<MainShell> {
     final channel = MethodChannel('com.vibro.app/launch');
     channel.setMethodCallHandler((call) async {
        if (call.method == "onAutoOpenTriggered") {
-         if (mounted && _currentIndex != 3) {
-           setState(() => _currentIndex = 3);
+         if (mounted && _currentIndex != 1) {
+           setState(() => _currentIndex = 1);
          }
        }
     });

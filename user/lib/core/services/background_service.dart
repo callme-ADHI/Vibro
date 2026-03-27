@@ -104,8 +104,24 @@ void onStart(ServiceInstance service) async {
     recognition.startListening();
   }
 
+  bool isCapturingNotification = false;
+  Timer? capturingTimer;
+
   // 4. Listen for detection events
   recognition.detectionStream.listen((event) async {
+    // Start/Reset notification captioning window
+    isCapturingNotification = true;
+    capturingTimer?.cancel();
+    capturingTimer = Timer(const Duration(seconds: 45), () {
+      isCapturingNotification = false;
+      if (service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: BackgroundService.notificationTitle,
+          content: BackgroundService.notificationContent,
+        );
+      }
+    });
+
     // Logic to trigger App Foregrounding
     await _bringAppToForeground(event.name);
     
@@ -117,6 +133,15 @@ void onStart(ServiceInstance service) async {
   });
 
   recognition.transcriptionStream.listen((event) {
+    if (isCapturingNotification) {
+      final String text = event['text'] ?? '';
+      if (text.isNotEmpty && service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: 'Vibro: Live Captioning...',
+          content: text.length > 50 ? '...' + text.substring(text.length - 47) : text,
+        );
+      }
+    }
     service.invoke('onTranscription', event);
   });
 
@@ -182,23 +207,20 @@ Future<void> _bringAppToForeground(String name) async {
 
   // 3. Try to launch the activity directly
   try {
-    final hasPermission = await Permission.systemAlertWindow.isGranted;
-    if (hasPermission) {
-      const intent = AndroidIntent(
-        action: 'android.intent.action.MAIN',
-        package: 'com.vibro.vibro',
-        componentName: 'com.vibro.vibro.MainActivity',
-        flags: [
-          0x10000000, // FLAG_ACTIVITY_NEW_TASK
-          0x20000000, // FLAG_ACTIVITY_SINGLE_TOP
-          0x00020000, // FLAG_ACTIVITY_REORDER_TO_FRONT
-        ],
-      );
-      await intent.launch();
-      print('DEBUG BG: Intent launched successfully');
-    } else {
-      print('DEBUG BG: No SYSTEM_ALERT_WINDOW permission, relying on notification');
-    }
+    const intent = AndroidIntent(
+      action: 'android.intent.action.MAIN',
+      package: 'com.vibro.vibro',
+      category: 'android.intent.category.LAUNCHER',
+      componentName: 'com.vibro.vibro.MainActivity',
+      flags: [
+        0x10000000, // FLAG_ACTIVITY_NEW_TASK
+        0x20000000, // FLAG_ACTIVITY_SINGLE_TOP
+        0x00020000, // FLAG_ACTIVITY_REORDER_TO_FRONT
+      ],
+      arguments: {'auto_open': true},
+    );
+    await intent.launch();
+    print('DEBUG BG: Intent launched successfully');
   } catch (e) {
     print('ERROR BG: Failed to launch intent: $e');
   }

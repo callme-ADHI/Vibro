@@ -52,22 +52,22 @@ class VibroBottomNav extends StatelessWidget {
               ),
               _buildNavItem(
                 index: 1,
-                icon: Icons.person_outline_rounded,
-                activeIcon: Icons.person_rounded,
-                label: 'Names',
+                icon: Icons.subtitles_outlined, // Was index 3
+                activeIcon: Icons.subtitles_rounded,
+                label: 'Captions', // Was index 3
               ),
-              _buildCenterButton(),
+              _buildCenterButton(), // Index 2
               _buildNavItem(
                 index: 3,
-                icon: Icons.subtitles_outlined,
-                activeIcon: Icons.subtitles_rounded,
-                label: 'Captions',
+                icon: Icons.person_outline_rounded, // Was index 1
+                activeIcon: Icons.person_rounded,
+                label: 'Models', // Was index 1 (Names)
               ),
               _buildNavItem(
                 index: 4,
-                icon: Icons.settings_outlined,
-                activeIcon: Icons.settings_rounded,
-                label: 'Settings',
+                icon: Icons.sensors_outlined, // Was settings
+                activeIcon: Icons.sensors_rounded,
+                label: 'Connectivity', // Was settings
               ),
             ],
           ),
