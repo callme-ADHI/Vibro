@@ -8,7 +8,7 @@ import '../../core/theme/app_typography.dart';
 import '../../core/services/training_service.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/ble_service.dart';
-import '../../core/services/phone_ble_service.dart';
+import '../../core/services/wifi_service.dart';
 import '../../core/providers/user_provider.dart';
 import 'training_status_page.dart';
 import 'locations_page.dart';
@@ -30,11 +30,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   int _locationCount = 0;
   int _detectionCount = 0; // Added detection count
   bool _isBleConnected = false;
-  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
+  PhoneWifiStatus _wifiStatus = PhoneWifiStatus.idle;
 
   Timer? _refreshTimer;
   StreamSubscription? _bleSub;
-  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
+  StreamSubscription<PhoneWifiStatus>? _wifiStatusSub;
 
   @override
   void initState() {
@@ -50,10 +50,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     _isBleConnected = BleService.instance.isConnected;
 
-    // Phone BLE status (Connected user pairing)
-    _phoneBleStatus = DeafPhoneBleClient.instance.status;
-    _phoneBleStatusSub = DeafPhoneBleClient.instance.statusStream.listen((s) {
-      if (mounted) setState(() => _phoneBleStatus = s);
+    // WiFi pairing status (Deaf phone server)
+    _wifiStatus = DeafPhoneWifiServer.instance.status;
+    _wifiStatusSub = DeafPhoneWifiServer.instance.statusStream.listen((s) {
+      if (mounted) setState(() => _wifiStatus = s);
     });
   }
   
@@ -138,6 +138,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   void dispose() {
     _refreshTimer?.cancel();
     _bleSub?.cancel();
+    _wifiStatusSub?.cancel();
     super.dispose();
   }
 
@@ -264,19 +265,20 @@ class _HomePageState extends ConsumerState<HomePage> {
                     statusColor: _locationCount > 0 ? AppColors.success : AppColors.accentNavy,
                   ),
                 ),
-                GestureDetector(
-                  onTap: () => Navigator.of(context).push(
+                  GestureDetector(
+                  onTap: () =>
+                      Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const BleDevicesPage()),
                   ),
                   child: _buildFeatureCard(
-                    icon: _phoneBleStatus == PhoneBleStatus.paired
-                        ? Icons.bluetooth_connected_rounded
+                    icon: _wifiStatus == PhoneWifiStatus.paired
+                        ? Icons.wifi_rounded
                         : Icons.developer_board_rounded,
                     title: 'Device',
-                    subtitle: _phoneBleStatus == PhoneBleStatus.paired
-                        ? 'BLE Paired'
+                    subtitle: _wifiStatus == PhoneWifiStatus.paired
+                        ? 'WiFi Paired'
                         : _isBleConnected ? 'ESP32 Connected' : 'Tap to pair',
-                    statusColor: _phoneBleStatus == PhoneBleStatus.paired
+                    statusColor: _wifiStatus == PhoneWifiStatus.paired
                         ? AppColors.success
                         : _isBleConnected ? AppColors.accentNavy : AppColors.textSecondary,
                   ),
@@ -299,11 +301,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   const Divider(color: AppColors.divider, height: 1),
                   _buildStatusRow(
-                      'Phone BLE',
-                      _phoneBleStatus == PhoneBleStatus.paired
-                          ? 'Paired · ${DeafPhoneBleClient.instance.pairedDeviceName}'
-                          : _phoneBleStatus == PhoneBleStatus.scanning ? 'Scanning…' : 'Not paired',
-                      _phoneBleStatus == PhoneBleStatus.paired ? AppColors.success : AppColors.textSecondary,
+                      'WiFi Pairing',
+                      _wifiStatus == PhoneWifiStatus.paired
+                          ? 'Paired · ${DeafPhoneWifiServer.instance.serverAddress}'
+                          : _wifiStatus == PhoneWifiStatus.advertising ? 'Waiting…' : 'Not paired',
+                      _wifiStatus == PhoneWifiStatus.paired ? AppColors.success : AppColors.textSecondary,
                   ),
                   const Divider(color: AppColors.divider, height: 1),
                   _buildStatusRow(

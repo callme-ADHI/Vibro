@@ -4,7 +4,6 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_linux
-  bluetooth_low_energy_linux
   gtk
   record_linux
   url_launcher_linux

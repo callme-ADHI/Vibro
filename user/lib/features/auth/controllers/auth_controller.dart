@@ -120,6 +120,52 @@ class AuthController extends StateNotifier<AuthState> {
           error: e.toString().replaceAll('Exception: ', ''));
     }
   }
+
+  /// Verifies OTP token (email magic link / OTP) and saves user profile.
+  /// Called from OtpVerificationScreen after user enters the 6-digit code.
+  Future<void> verifyOtpAndSaveProfile({
+    required String email,
+    required String token,
+    required String fullName,
+    required DateTime dob,
+    required String userType,
+  }) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final response = await Supabase.instance.client.auth.verifyOTP(
+        email: email,
+        token: token,
+        type: OtpType.email,
+      );
+
+      if (response.user != null) {
+        final String uniqueId = _generateUniqueId(userType);
+        await _authService.saveProfileData(
+          userId: response.user!.id,
+          uniqueUserId: uniqueId,
+          email: email,
+          fullName: fullName,
+          dob: dob,
+          role: userType,
+        );
+
+        await _ref.read(userProvider.notifier).loadProfile();
+
+        state = state.copyWith(
+          isLoading: false,
+          isAuthenticated: true,
+          userType: userType,
+        );
+      } else {
+        state = state.copyWith(
+            isLoading: false, error: 'OTP verification failed. Please try again.');
+      }
+    } catch (e) {
+      state = state.copyWith(
+          isLoading: false,
+          error: e.toString().replaceAll('Exception: ', ''));
+    }
+  }
 }
 
 // Provider for AuthController

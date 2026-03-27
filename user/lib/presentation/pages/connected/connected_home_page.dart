@@ -14,7 +14,8 @@ import '../../../core/theme/app_typography.dart';
 import '../../../core/providers/user_provider.dart';
 import '../../../core/services/recognition_service.dart';
 import '../../../core/services/kws_service.dart';
-import '../../../core/services/phone_ble_service.dart';
+import '../../../core/services/wifi_service.dart';
+import '../../../core/services/foreground_service.dart';
 
 // ── Provider: fetch relations + assigned name labels ─────────────────────────
 final connectedRelationsProvider =
@@ -68,11 +69,11 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     with SingleTickerProviderStateMixin {
   // ── Services ──────────────────────────────────────────────────────────────
   final RecognitionService _recognition = RecognitionService.instance;
-  final ConnectedPhoneBleServer _ble = ConnectedPhoneBleServer.instance;
+  final ConnectedPhoneWifiClient _wifi = ConnectedPhoneWifiClient.instance;
 
   // ── State ─────────────────────────────────────────────────────────────────
   RecognitionState _recState = RecognitionState.IDLE;
-  PhoneBleStatus _bleStatus = PhoneBleStatus.idle;
+  PhoneWifiStatus _wifiStatus = PhoneWifiStatus.idle;
 
   bool get _isListening =>
       _recState == RecognitionState.LISTENING ||
@@ -86,7 +87,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   // ── Subscriptions ─────────────────────────────────────────────────────────
   StreamSubscription<DetectionEvent>? _detectionSub;
   StreamSubscription<RecognitionState>? _stateSub;
-  StreamSubscription<PhoneBleStatus>? _bleSub;
+  StreamSubscription<PhoneWifiStatus>? _wifiSub;
 
   // ── Animation ─────────────────────────────────────────────────────────────
   late final AnimationController _pulseCtrl;
@@ -117,15 +118,23 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
       }
     });
 
-    // Speech detections → BLE alert
+    // Speech detections → WiFi alert
     _detectionSub = _recognition.detectionStream.listen(_onDetected);
 
-    // BLE status
-    _bleSub = _ble.statusStream.listen((status) {
+    // WiFi status
+    _wifiSub = _wifi.statusStream.listen((status) {
       if (!mounted) return;
-      setState(() => _bleStatus = status);
+      setState(() => _wifiStatus = status);
     });
-    _bleStatus = _ble.status;
+    _wifiStatus = _wifi.status;
+
+    // Start foreground service for background operation
+    VibroForegroundService.instance.start(mode: 'connected');
+
+    // Automatically hunt and seamlessly pair with Deaf device
+    if (_wifiStatus == PhoneWifiStatus.idle || _wifiStatus == PhoneWifiStatus.disconnected) {
+      _wifi.startAutoConnect().catchError((_) {});
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -144,13 +153,13 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
         .toSet();
   }
 
-  // ── BLE Advertising toggle ──────────────────────────────────────────────
+  // ── WiFi scan/connect toggle ──────────────────────────────────────────────
   Future<void> _toggleBle() async {
-    if (_bleStatus == PhoneBleStatus.advertising || _bleStatus == PhoneBleStatus.paired) {
-      await _ble.stopAdvertising();
+    if (_wifiStatus == PhoneWifiStatus.paired || _wifiStatus == PhoneWifiStatus.scanning) {
+      await _wifi.disconnect();
     } else {
       try {
-        await _ble.startAdvertising();
+        await _wifi.startAutoConnect();
       } catch (e) {
         _showSnack(e.toString(), error: true);
       }
@@ -172,9 +181,9 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
           error: true);
       return;
     }
-    // Auto-ensure advertising so Deaf phone can connect
-    if (_bleStatus == PhoneBleStatus.idle || _bleStatus == PhoneBleStatus.unsupported) {
-      _ble.startAdvertising().catchError((e) {
+    // Auto-start WiFi scan so Deaf phone can be found
+    if (_wifiStatus == PhoneWifiStatus.idle || _wifiStatus == PhoneWifiStatus.disconnected) {
+      _wifi.startAutoConnect().catchError((e) {
         _showSnack(e.toString(), error: true);
       });
     }
@@ -204,14 +213,14 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
           confidence: event.confidence,
         );
 
-        // ── Primary: BLE ──
-        bool sentViaBle = false;
-        if (_bleStatus == PhoneBleStatus.paired) {
-          sentViaBle = await _ble.sendAlert(payload);
+        // ── Primary: WiFi ──
+        bool sentViaWifi = false;
+        if (_wifiStatus == PhoneWifiStatus.paired) {
+          sentViaWifi = await _wifi.sendAlert(payload);
         }
 
         // ── Fallback: DB ──
-        if (!sentViaBle) {
+        if (!sentViaWifi) {
           try {
             await Supabase.instance.client.from('relation_alerts').insert({
               'deaf_user_id': deafUserId,
@@ -232,20 +241,20 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
               'deaf_name': deafName,
               'relation_label': label,
               'timestamp': event.timestamp,
-              'via_ble': sentViaBle,
+              'via_ble': sentViaWifi,
             });
             if (_localLog.length > 30) _localLog.removeLast();
           });
         }
 
-        _triggerConnectedFeedback(event.name, label, event.confidence, sentViaBle);
+        _triggerConnectedFeedback(event.name, label, event.confidence, sentViaWifi);
         break;
       }
     }
   }
 
   Future<void> _triggerConnectedFeedback(
-      String name, String label, double confidence, bool viaBle) async {
+      String name, String label, double confidence, bool viaWifi) async {
     if (await Vibration.hasVibrator()) {
       Vibration.vibrate(duration: 300);
     } else {
@@ -255,7 +264,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     await _notifications.show(
       0,
       '🎙️ You called "$name"!',
-      'Alert sent to $label via ${viaBle ? "Bluetooth" : "internet"}',
+      'Alert sent to $label via ${viaWifi ? "WiFi" : "internet"}',
       const NotificationDetails(
         android: AndroidNotificationDetails(
           'vibro_connected', 'Connected Alerts',
@@ -265,20 +274,20 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
       ),
     );
 
-    _showSnack('You called "$name" → $label notified via ${viaBle ? "BLE" : "internet"}');
+    _showSnack('You called "$name" → $label notified via ${viaWifi ? "WiFi" : "internet"}');
   }
 
   Future<void> _sendManualAlert(String deafUserId, String label) async {
     final me = Supabase.instance.client.auth.currentUser;
     if (me == null) return;
 
-    bool sentViaBle = false;
-    if (_bleStatus == PhoneBleStatus.paired) {
-      sentViaBle = await _ble.sendAlert(PhoneAlertPayload(
+    bool sentViaWifi = false;
+    if (_wifiStatus == PhoneWifiStatus.paired) {
+      sentViaWifi = await _wifi.sendAlert(PhoneAlertPayload(
         label: label, name: 'manual', confidence: 1.0,
       ));
     }
-    if (!sentViaBle) {
+    if (!sentViaWifi) {
       try {
         await Supabase.instance.client.from('relation_alerts').insert({
           'deaf_user_id': deafUserId,
@@ -287,13 +296,12 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
           'model_name': 'manual',
           'confidence': 1.0,
         });
-        sentViaBle = false;
       } catch (e) {
         _showSnack('Failed to send alert.', error: true);
         return;
       }
     }
-    _showSnack('Manual alert sent via ${sentViaBle ? "BLE" : "internet"}');
+    _showSnack('Manual alert sent via ${sentViaWifi ? "WiFi" : "internet"}');
   }
 
   void _showSnack(String msg, {bool error = false}) {
@@ -310,8 +318,8 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     _recognition.stopListening();
     _detectionSub?.cancel();
     _stateSub?.cancel();
-    _bleSub?.cancel();
-    _ble.stopAdvertising();
+    _wifiSub?.cancel();
+    // Keep WiFi client alive in background for reconnect
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -403,29 +411,29 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
 
   // ── BLE badge helpers ──────────────────────────────────────────────────────
   Color get _bleBadgeColor {
-    switch (_bleStatus) {
-      case PhoneBleStatus.paired: return AppColors.success;
-      case PhoneBleStatus.advertising: return AppColors.accentNavy;
-      case PhoneBleStatus.connecting: return AppColors.warning;
+    switch (_wifiStatus) {
+      case PhoneWifiStatus.paired: return AppColors.success;
+      case PhoneWifiStatus.scanning: return AppColors.accentNavy;
+      case PhoneWifiStatus.connecting: return AppColors.warning;
       default: return AppColors.textSecondary;
     }
   }
 
   IconData get _bleIcon {
-    switch (_bleStatus) {
-      case PhoneBleStatus.paired: return Icons.bluetooth_connected_rounded;
-      case PhoneBleStatus.advertising: return Icons.bluetooth_searching_rounded;
-      case PhoneBleStatus.connecting: return Icons.bluetooth_searching_rounded;
-      default: return Icons.bluetooth_rounded;
+    switch (_wifiStatus) {
+      case PhoneWifiStatus.paired: return Icons.wifi_rounded;
+      case PhoneWifiStatus.scanning: return Icons.wifi_find_rounded;
+      case PhoneWifiStatus.connecting: return Icons.wifi_find_rounded;
+      default: return Icons.wifi_off_rounded;
     }
   }
 
   String get _bleLabel {
-    switch (_bleStatus) {
-      case PhoneBleStatus.paired: return 'PAIRED';
-      case PhoneBleStatus.advertising: return 'ADVERTISING';
-      case PhoneBleStatus.connecting: return 'PAIRING';
-      default: return 'PAIR';
+    switch (_wifiStatus) {
+      case PhoneWifiStatus.paired: return 'PAIRED';
+      case PhoneWifiStatus.scanning: return 'SCANNING';
+      case PhoneWifiStatus.connecting: return 'JOINING';
+      default: return 'CONNECT';
     }
   }
 
@@ -436,8 +444,8 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   Widget _buildBody(List<Map<String, dynamic>> relations) {
     return SingleChildScrollView(
       child: Column(children: [
-        // BLE status banner
-        if (_bleStatus != PhoneBleStatus.paired) _buildBleBanner(),
+        // WiFi status banner
+        if (_wifiStatus != PhoneWifiStatus.paired) _buildWifiBanner(),
 
         // Mic section
         Padding(
@@ -478,10 +486,11 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
     );
   }
 
-  // ── BLE status banner ────────────────────────────────────────────────────
-  Widget _buildBleBanner() {
-    final isSearching = _bleStatus == PhoneBleStatus.advertising ||
-        _bleStatus == PhoneBleStatus.connecting;
+
+  // ── WiFi status banner ───────────────────────────────────────────────────
+  Widget _buildWifiBanner() {
+    final isSearching = _wifiStatus == PhoneWifiStatus.scanning ||
+        _wifiStatus == PhoneWifiStatus.connecting;
 
     return GestureDetector(
       onTap: _toggleBle,
@@ -498,14 +507,14 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
               child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning),
             )
           else
-            Icon(Icons.bluetooth_rounded,
+            Icon(Icons.wifi_off_rounded,
                 size: 16, color: AppColors.primaryNavy.withValues(alpha: 0.7)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               isSearching
-                  ? 'Advertising. Waiting for Deaf device to connect...'
-                  : 'Tap to start advertising via Bluetooth',
+                  ? 'Scanning WiFi for Deaf device…'
+                  : 'Tap to scan for Deaf device on WiFi',
               style: AppTypography.metadata(
                   color: isSearching ? AppColors.warning : AppColors.primaryNavy)
                   .copyWith(fontWeight: FontWeight.w600),
@@ -518,6 +527,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
       ),
     );
   }
+
 
   // ── Mic button ─────────────────────────────────────────────────────────────
   Widget _buildMicSection() {
@@ -580,7 +590,7 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
         _isListening
             ? 'Monitoring: ${_allNameLabels.join(", ")}'
             : hasModels
-                ? '${_allNameLabels.length} name(s) • alerts via ${_bleStatus == PhoneBleStatus.paired ? "Bluetooth" : "internet"}'
+                ? '${_allNameLabels.length} name(s) · alerts via ${_wifiStatus == PhoneWifiStatus.paired ? "WiFi" : "internet"}'
                 : 'Ask Deaf user to assign models',
         style: AppTypography.bodySmall(color: AppColors.textSecondary),
         textAlign: TextAlign.center,

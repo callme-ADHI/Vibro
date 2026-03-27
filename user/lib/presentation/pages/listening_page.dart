@@ -11,7 +11,7 @@ import '../../core/services/location_service.dart';
 import '../../core/services/history_service.dart';
 import '../../core/services/kws_service.dart'; // DetectionEvent
 import '../../core/services/ble_service.dart'; // BLE (ESP32)
-import '../../core/services/phone_ble_service.dart'; // Phone-to-phone BLE
+import '../../core/services/wifi_service.dart'; // Phone-to-phone WiFi
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'locations_page.dart';
@@ -30,7 +30,7 @@ class _ListeningPageState extends State<ListeningPage>
   final NameService _nameService = NameService.instance;
   final LocationService _locationService = LocationService.instance;
   final BleService _bleService = BleService.instance;
-  final DeafPhoneBleClient _phoneBle = DeafPhoneBleClient.instance;  // BLE server
+  final DeafPhoneWifiServer _wifiServer = DeafPhoneWifiServer.instance;  // WiFi server
 
   // State from Service
   RecognitionState _recState = RecognitionState.IDLE;
@@ -45,13 +45,13 @@ class _ListeningPageState extends State<ListeningPage>
   StreamSubscription<DetectionEvent>? _detectionSub;
   StreamSubscription<RecognitionState>? _stateSub;
   StreamSubscription? _bleSub;
-  StreamSubscription<PhoneAlertPayload>? _phoneBleAlertSub;
-  StreamSubscription<PhoneBleStatus>? _phoneBleStatusSub;
+  StreamSubscription<PhoneAlertPayload>? _wifiAlertSub;
+  StreamSubscription<PhoneWifiStatus>? _wifiStatusSub;
   Timer? _refreshTimer;
   RealtimeChannel? _alertChannel;
 
-  PhoneBleStatus _phoneBleStatus = PhoneBleStatus.idle;
-  bool get _isPhonePaired => _phoneBleStatus == PhoneBleStatus.paired;
+  PhoneWifiStatus _wifiStatus = PhoneWifiStatus.idle;
+  bool get _isPhonePaired => _wifiStatus == PhoneWifiStatus.paired;
   
   final List<DetectionEvent> _detections = [];
   List<String> _availableNames = [];
@@ -83,17 +83,19 @@ class _ListeningPageState extends State<ListeningPage>
     // Auto-refresh every 5s
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
 
-    // Start phone-to-phone BLE advertising (Deaf phone is always the server)
-    _phoneBle.disconnect(); // client does not advertise
-    _phoneBleStatusSub = _phoneBle.statusStream.listen((s) {
+    // Start phone-to-phone WiFi server (Deaf phone always runs the server)
+    if (_wifiServer.status == PhoneWifiStatus.idle) {
+      _wifiServer.startServer();
+    }
+    _wifiStatusSub = _wifiServer.statusStream.listen((s) {
       if (!mounted) return;
-      setState(() => _phoneBleStatus = s);
+      setState(() => _wifiStatus = s);
     });
-    _phoneBleAlertSub = _phoneBle.alertStream.listen((payload) {
+    _wifiAlertSub = _wifiServer.alertStream.listen((payload) {
       if (!mounted) return;
-      _onPhoneBleAlert(payload);
+      _onPhoneWifiAlert(payload);
     });
-    _phoneBleStatus = _phoneBle.status;
+    _wifiStatus = _wifiServer.status;
 
     // BLE Init
     _bleService.initialize();
@@ -147,8 +149,8 @@ class _ListeningPageState extends State<ListeningPage>
     _subscribeToRelationAlerts();
   }
 
-  // ── Phone BLE Alert handler (primary path) ────────────────────────────────
-  Future<void> _onPhoneBleAlert(PhoneAlertPayload payload) async {
+  // ── WiFi Alert handler (primary path) ───────────────────────────────────
+  Future<void> _onPhoneWifiAlert(PhoneAlertPayload payload) async {
     if (await Vibration.hasVibrator() ?? false) {
       Vibration.vibrate(pattern: [0, 500, 150, 500]);
     } else {
@@ -159,10 +161,10 @@ class _ListeningPageState extends State<ListeningPage>
     await _notifications.show(
       2,
       '📣 ${payload.label} called you!',
-      'They said "${payload.name}" via Bluetooth',
+      'They said "${payload.name}" via WiFi',
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          'vibro_ble_alerts', 'BLE Alerts',
+          'vibro_wifi_alerts', 'WiFi Alerts',
           importance: Importance.max,
           priority: Priority.high,
         ),
@@ -173,7 +175,7 @@ class _ListeningPageState extends State<ListeningPage>
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Row(children: [
-          const Icon(Icons.bluetooth_rounded, color: AppColors.white, size: 16),
+          const Icon(Icons.wifi_rounded, color: AppColors.white, size: 16),
           const SizedBox(width: 8),
           Expanded(child: Text(
             '${payload.label} called you! ("${payload.name}" · ${(payload.confidence * 100).toInt()}%)',
@@ -405,10 +407,10 @@ class _ListeningPageState extends State<ListeningPage>
     _detectionSub?.cancel();
     _stateSub?.cancel();
     _bleSub?.cancel();
-    _phoneBleAlertSub?.cancel();
-    _phoneBleStatusSub?.cancel();
+    _wifiAlertSub?.cancel();
+    _wifiStatusSub?.cancel();
     _alertChannel?.unsubscribe();
-    _phoneBle.disconnect();
+    // Do NOT stop WiFi server — keep alive for background alerts
     _pulseCtrl.dispose();
     super.dispose();
   }

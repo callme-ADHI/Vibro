@@ -6,14 +6,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';
-import 'core/services/ble_service.dart';
+import 'core/services/ble_service.dart';           // ESP32 hardware wearable
+import 'core/services/foreground_service.dart';    // Background keepalive
 import 'presentation/pages/splash_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Start BLE Service
+  // Start ESP32 hardware BLE (wearable device connectivity)
   BleService.instance.initialize();
+
+  // Start Android foreground service to keep WiFi + speech alive in bg
+  VibroForegroundService.instance.start(mode: 'deaf');
 
   // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(
