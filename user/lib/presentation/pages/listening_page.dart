@@ -84,7 +84,7 @@ class _ListeningPageState extends State<ListeningPage>
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadNamesAndInit(silent: true));
 
     // Start phone-to-phone BLE advertising (Deaf phone is always the server)
-    _phoneBle.disconnect() // client does not advertise;
+    _phoneBle.disconnect(); // client does not advertise
     _phoneBleStatusSub = _phoneBle.statusStream.listen((s) {
       if (!mounted) return;
       setState(() => _phoneBleStatus = s);
