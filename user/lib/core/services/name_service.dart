@@ -28,16 +28,20 @@ class NameService {
     if (_userId == null) return {};
 
     try {
-      // Use user_training_status to check if model is COMPLETED
+      // Fetch from audio_submissions and join trained_names
+      // This matches NamesPage logic exactly
       final response = await _client
-          .from('trained_names')
-          .select('name_label, user_training_status!inner(status)')
+          .from('audio_submissions')
+          .select('status, trained_names!inner(name_label)')
           .eq('user_id', _userId!)
-          .eq('user_training_status.status', 'COMPLETED');
+          .eq('status', 'completed');
 
       final List<dynamic> data = response as List<dynamic>;
       return data
-          .map((n) => (n['name_label'] as String?) ?? '')
+          .map((n) {
+            final trainedName = n['trained_names'] as Map<String, dynamic>?;
+            return (trainedName?['name_label'] as String?) ?? '';
+          })
           .where((s) => s.isNotEmpty)
           .toSet();
     } catch (e) {

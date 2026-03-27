@@ -31,7 +31,7 @@ BEGIN
     
     -- If no active subscription, use basic limits
     IF location_limit IS NULL THEN
-        location_limit := 5; -- Increased from 2 to 5
+        location_limit := 3; -- Increased from 2 to 5
     END IF;
     
     -- If we are inserting "General Mode", we ALWAYS allow it via a high limit bypass

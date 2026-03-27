@@ -34,21 +34,11 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _currentIndex = widget.initialIndex;
 
-    // 1. Listen for background detection events
+    // 1. Listen for background detection events (In-App Force Switch)
     FlutterBackgroundService().on('onDetection').listen((event) {
       if (mounted && _currentIndex != 1) {
         setState(() => _currentIndex = 1);
       }
-    });
-
-    // 2. Listen for native auto-open triggers (MethodChannel)
-    final channel = MethodChannel('com.vibro.app/launch');
-    channel.setMethodCallHandler((call) async {
-       if (call.method == "onAutoOpenTriggered") {
-         if (mounted && _currentIndex != 1) {
-           setState(() => _currentIndex = 1);
-         }
-       }
     });
   }
 

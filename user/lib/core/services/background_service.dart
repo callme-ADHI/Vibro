@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'recognition_service.dart';
 import 'name_service.dart';
 import 'location_service.dart';
+import 'package:vibration/vibration.dart';
 
 class BackgroundService {
   static const String channelId = 'vibro_background';
@@ -35,12 +36,12 @@ class BackgroundService {
       importance: Importance.low,
     );
 
-    // 2. Create the HIGH-priority detection channel (needed for fullScreenIntent)
+    // 2. Create the standard detection channel
     const AndroidNotificationChannel detectionChannel = AndroidNotificationChannel(
       detectionChannelId,
       'Name Detection Alerts',
-      description: 'Triggers app opening when a registered name is detected',
-      importance: Importance.max,
+      description: 'Notifies when a registered name is detected',
+      importance: Importance.defaultImportance, // Standard priority
     );
 
     await flutterLocalNotificationsPlugin
@@ -186,10 +187,15 @@ void onStart(ServiceInstance service) async {
       }
     });
 
-    // Logic to trigger App Foregrounding
-    await _bringAppToForeground(event.name);
+    // 1. Vibrate device (awarenes even if screen off)
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 500, 200, 500]); // Noticeable pattern
+    }
+
+    // 2. Trigger Notification
+    await _showDetectionNotification(event.name);
     
-    // Notify the main isolate
+    // 3. Notify the main isolate (for in-app tab switching)
     service.invoke('onDetection', {
       'name': event.name,
       'confidence': event.confidence,
@@ -232,37 +238,24 @@ void onStart(ServiceInstance service) async {
   });
 }
 
-Future<void> _bringAppToForeground(String name) async {
-  // 0. Check preference
-  final prefs = await SharedPreferences.getInstance();
-  final enabled = prefs.getBool('auto_open_enabled') ?? true;
-  if (!enabled) return;
-
-  // ★ KEY FIX: Set SharedPreferences flag so the app reads it on cold start
-  await prefs.setBool('pending_auto_open', true);
-  await prefs.setString('pending_auto_open_name', name);
-  print('DEBUG BG: Set pending_auto_open flag for "$name"');
-
+Future<void> _showDetectionNotification(String name) async {
   // 1. Initialize notifications plugin in this isolate
   final FlutterLocalNotificationsPlugin notifications =
       FlutterLocalNotificationsPlugin();
 
-  // Initialize the plugin (required in background isolate)
   const initSettings = InitializationSettings(
     android: AndroidInitializationSettings('@mipmap/ic_launcher'),
   );
   await notifications.initialize(initSettings);
 
-  // 2. Show high-priority notification with full-screen intent
-  //    Using the channel ID that was already created in initialize()
+  // 2. Show standard notification (Noticeable but NOT full-screen)
   const androidDetails = AndroidNotificationDetails(
-    'vibro_detections_high', // ★ Must match the channel created in initialize()
+    'vibro_detections_high', // Reusing channel ID
     'Name Detection Alerts',
-    channelDescription: 'Triggers app opening when a registered name is detected',
-    importance: Importance.max,
-    priority: Priority.high,
-    fullScreenIntent: true,
-    category: AndroidNotificationCategory.alarm,
+    channelDescription: 'Notifies when a registered name is detected',
+    importance: Importance.defaultImportance,
+    priority: Priority.defaultPriority,
+    fullScreenIntent: false, // NO auto-open
   );
 
   const details = NotificationDetails(android: androidDetails);
@@ -270,28 +263,8 @@ Future<void> _bringAppToForeground(String name) async {
   await notifications.show(
     999,
     '$name Detected!',
-    'Tap to open Live Captions',
+    'Tap to view Live Captions',
     details,
     payload: 'navigate_to_captions',
   );
-
-  // 3. Try to launch the activity directly
-  try {
-    const intent = AndroidIntent(
-      action: 'android.intent.action.MAIN',
-      package: 'com.vibro.vibro',
-      category: 'android.intent.category.LAUNCHER',
-      componentName: 'com.vibro.vibro.MainActivity',
-      flags: [
-        0x10000000, // FLAG_ACTIVITY_NEW_TASK
-        0x20000000, // FLAG_ACTIVITY_SINGLE_TOP
-        0x00020000, // FLAG_ACTIVITY_REORDER_TO_FRONT
-      ],
-      arguments: {'auto_open': true},
-    );
-    await intent.launch();
-    print('DEBUG BG: Intent launched successfully');
-  } catch (e) {
-    print('ERROR BG: Failed to launch intent: $e');
-  }
 }

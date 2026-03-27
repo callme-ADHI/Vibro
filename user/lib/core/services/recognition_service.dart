@@ -244,13 +244,9 @@ class RecognitionService {
     _updateState(RecognitionState.ERROR);
     
     // Some errors might be reported as permanent but are often transient in background
+    // We remove the max restart limit so the accessibility service NEVER stops on its own.
     if (error.permanent && error.errorMsg != 'error_busy') {
-      _restartAttempts++;
-      if (_restartAttempts > _maxRestartAttempts) {
-        print('CRITICAL ASR: Max restart attempts reached for ${error.errorMsg}. Stopping.');
-        stopListening();
-        return;
-      }
+      print('CRITICAL ASR: "Permanent" error ${error.errorMsg} encountered. Forcing restart for continuous background listening.');
     }
     
     _scheduleRestart(isError: true);
