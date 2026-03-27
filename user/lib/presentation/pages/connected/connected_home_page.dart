@@ -145,11 +145,15 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   }
 
   // ── BLE Advertising toggle ──────────────────────────────────────────────
-  void _toggleBle() {
+  Future<void> _toggleBle() async {
     if (_bleStatus == PhoneBleStatus.advertising || _bleStatus == PhoneBleStatus.paired) {
-      _ble.stopAdvertising();
+      await _ble.stopAdvertising();
     } else {
-      _ble.startAdvertising();
+      try {
+        await _ble.startAdvertising();
+      } catch (e) {
+        _showSnack('BLE Advertising Error: $e', error: true);
+      }
     }
   }
 

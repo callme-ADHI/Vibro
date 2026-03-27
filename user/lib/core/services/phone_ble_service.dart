@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 // ── UUIDs ──────────────────────────────────────────────────────────────────
 final kVibroServiceUUID   = UUID.fromString('4a4b4c00-cafe-babe-c0ff-ee1234567890');
@@ -106,6 +107,12 @@ class ConnectedPhoneBleServer {
   // ── Start advertising ─────────────────────────────────────────────────────
   Future<void> startAdvertising() async {
     try {
+      await [
+        Permission.bluetooth,
+        Permission.bluetoothAdvertise,
+        Permission.bluetoothConnect,
+      ].request();
+
       // Alert characteristic — NOTIFY so Deaf phone can subscribe
       _alertChar = GATTCharacteristic.mutable(
         uuid: kVibroAlertCharUUID,
@@ -162,6 +169,7 @@ class ConnectedPhoneBleServer {
     } catch (e) {
       print('VIBRO-SERVER: Failed: $e');
       _updateStatus(PhoneBleStatus.unsupported);
+      rethrow;
     }
   }
 
@@ -252,6 +260,13 @@ class DeafPhoneBleClient {
   // ── Start scanning ─────────────────────────────────────────────────────────
   Future<void> startScan() async {
     if (_status == PhoneBleStatus.scanning) return;
+
+    await [
+      Permission.bluetooth,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
 
     _discovered.clear();
     _discoveredCtrl.add([]);

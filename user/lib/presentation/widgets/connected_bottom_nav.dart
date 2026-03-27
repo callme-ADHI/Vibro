@@ -23,7 +23,7 @@ class ConnectedBottomNav extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildNavItem(0, Icons.dashboard_outlined, Icons.dashboard_rounded, 'Dashboard'),
-              _buildNavItem(1, Icons.group_outlined, Icons.group_rounded, 'Connect'),
+              _buildNavItem(1, Icons.group_outlined, Icons.group_rounded, 'Connections'),
               _buildNavItem(2, Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Logs'),
               _buildNavItem(3, Icons.account_circle_outlined, Icons.account_circle_rounded, 'Profile'),
             ],
