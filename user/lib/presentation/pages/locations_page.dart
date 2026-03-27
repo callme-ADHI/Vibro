@@ -1,5 +1,8 @@
-// VIBRO Locations Page — Add locations, assign names per location
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/location_service.dart';
@@ -17,6 +20,16 @@ class _LocationsPageState extends State<LocationsPage> {
   final LocationService _locationService = LocationService.instance;
   final NameService _nameService = NameService.instance;
 
+  // Map & Picking State
+  final MapController _mapController = MapController();
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  ll.LatLng _selectedPoint = const ll.LatLng(12.9716, 77.5946); // Default Bangalore
+  bool _isSearching = false;
+  bool _isSaving = false;
+  bool _isGettingGps = false;
+
+  // List State
   List<Map<String, dynamic>> _locations = [];
   final Map<String, List<String>> _namesPerLocation = {};
   List<Map<String, dynamic>> _allNames = [];
@@ -26,15 +39,12 @@ class _LocationsPageState extends State<LocationsPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadData();
+    _goToCurrentLocation(silent: true);
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
     try {
       final locations = await _locationService.getLocations();
       final names = await _nameService.getNames();
@@ -43,8 +53,7 @@ class _LocationsPageState extends State<LocationsPage> {
       for (final loc in locations) {
         final locId = loc['id'] as String;
         final mapped = await _locationService.getNamesForLocation(locId);
-        namesPerLoc[locId] =
-            mapped.map((m) => m['name_label'] as String).toList();
+        namesPerLoc[locId] = mapped.map((m) => m['name_label'] as String).toList();
       }
 
       if (mounted) {
@@ -66,62 +75,108 @@ class _LocationsPageState extends State<LocationsPage> {
     }
   }
 
-  Future<void> _addLocation() async {
-    if (_locations.length >= AppConstants.maxLocations) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Maximum ${AppConstants.maxLocations} locations allowed'),
-          backgroundColor: AppColors.warning,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    final name = await _showTextDialog('Add Location', 'e.g. Home, Office, Gym');
-    if (name == null || name.trim().isEmpty) return;
-
+  Future<void> _goToCurrentLocation({bool silent = false}) async {
+    if (!silent) setState(() => _isGettingGps = true);
     try {
-      await _locationService.createLocation(name.trim());
-      _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Added "$name"'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      final pos = await Geolocator.getCurrentPosition();
+      final point = ll.LatLng(pos.latitude, pos.longitude);
+      setState(() => _selectedPoint = point);
+      _mapController.move(point, 15);
+    } catch (_) {
+      // Ignore
+    } finally {
+      if (mounted && !silent) setState(() => _isGettingGps = false);
     }
   }
 
-  Future<void> _editNamesForLocation(Map<String, dynamic> location) async {
+  Future<void> _searchAddress() async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+
+    setState(() => _isSearching = true);
+    try {
+      final results = await locationFromAddress(query);
+      if (results.isNotEmpty) {
+        final loc = results.first;
+        final point = ll.LatLng(loc.latitude, loc.longitude);
+        setState(() => _selectedPoint = point);
+        _mapController.move(point, 15);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not found: $query')));
+      }
+    } finally {
+      if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  Future<void> _saveLocation() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a location name')));
+      return;
+    }
+
+    if (_locations.length >= AppConstants.maxLocations) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Maximum locations reached')));
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      await _locationService.createLocation(
+        locationName: name,
+        latitude: _selectedPoint.latitude,
+        longitude: _selectedPoint.longitude,
+        radius: 100.0,
+      );
+      _nameController.clear();
+      _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added "$name"')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _deleteLocation(Map<String, dynamic> location) async {
+    final name = location['location_name'] as String? ?? '';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete "$name"?'),
+        content: const Text('This will remove all name assignments for this location.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete', style: TextStyle(color: AppColors.error))),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _locationService.deleteLocation(location['id'] as String);
+      _loadData();
+    }
+  }
+
+  Future<void> _editNames(Map<String, dynamic> location) async {
     final locId = location['id'] as String;
     final locName = location['location_name'] as String? ?? '';
-
     final current = _namesPerLocation[locId] ?? [];
-    final nameIds = _allNames.map((n) => n['id'] as String).toList();
     final selectedIds = <String>{};
     for (final n in _allNames) {
-      final label = n['name_label'] as String? ?? '';
-      if (current.contains(label)) {
-        selectedIds.add(n['id'] as String);
-      }
+      if (current.contains(n['name_label'])) selectedIds.add(n['id'] as String);
     }
 
     final result = await showDialog<Set<String>>(
       context: context,
-      builder: (ctx) => _EditLocationNamesDialog(
+      builder: (ctx) => _EditNamesDialog(
         locationName: locName,
         allNames: _allNames,
         selectedIds: selectedIds,
@@ -129,299 +184,217 @@ class _LocationsPageState extends State<LocationsPage> {
     );
 
     if (result != null) {
-      try {
-        await _locationService.setNamesForLocation(locId, result.toList());
-        _load();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Names updated'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString().replaceFirst('Exception: ', '')),
-              backgroundColor: AppColors.error,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
+      await _locationService.setNamesForLocation(locId, result.toList());
+      _loadData();
     }
-  }
-
-  Future<void> _deleteLocation(Map<String, dynamic> location) async {
-    final name = location['location_name'] as String? ?? '';
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(
-          'Delete "$name"?',
-          style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
-        ),
-        content: Text(
-          'Name assignments for this location will be removed.',
-          style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(
-              'Delete',
-              style: AppTypography.bodyMedium(color: AppColors.error).copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        await _locationService.deleteLocation(location['id'] as String);
-        _load();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Deleted "$name"'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString().replaceFirst('Exception: ', '')),
-              backgroundColor: AppColors.error,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  Future<String?> _showTextDialog(String title, String hint) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(title, style: AppTypography.sectionTitle(color: AppColors.textPrimary)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: hint,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          onSubmitted: (_) => Navigator.of(ctx).pop(controller.text.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: Text('Add', style: AppTypography.bodyMedium(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: AppColors.lightSurface,
       appBar: AppBar(
+        title: const Text('Locations'),
         backgroundColor: AppColors.white,
+        foregroundColor: AppColors.textPrimary,
         elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          'Locations',
-          style: AppTypography.pageTitle(color: AppColors.textPrimary).copyWith(fontSize: 22),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppColors.divider),
-        ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
-                        const SizedBox(height: 16),
-                        Text(_error!, textAlign: TextAlign.center, style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        'Add up to ${AppConstants.maxLocations} locations. Assign which names to listen for at each location.',
-                        style: AppTypography.bodySmall(color: AppColors.textSecondary),
-                      ),
-                    ),
-                    Expanded(
-                      child: _locations.isEmpty
-                          ? _buildEmpty()
-                          : ListView.separated(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
-                              itemCount: _locations.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 12),
-                              itemBuilder: (_, i) {
-                                final loc = _locations[i];
-                                return _buildLocationCard(loc);
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-      floatingActionButton: _locations.length < AppConstants.maxLocations
-          ? FloatingActionButton.extended(
-              onPressed: _addLocation,
-              backgroundColor: AppColors.primaryNavy,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add Location'),
-            )
-          : null,
-    );
-  }
-
-  Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      body: Column(
         children: [
-          Icon(Icons.location_off_rounded, size: 64, color: AppColors.textSecondary.withValues(alpha: 0.4)),
-          const SizedBox(height: 16),
-          Text(
-            'No locations yet',
-            style: AppTypography.sectionTitle(color: AppColors.textSecondary),
+          // TOP 2/3: MAP SECTION
+          SizedBox(
+            height: size.height * 0.55,
+            child: _buildMapSection(),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Add a location (e.g. Home, Office) and assign names to listen for there.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall(color: AppColors.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _addLocation,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Add Location'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryNavy,
-              foregroundColor: AppColors.white,
-            ),
+          
+          // BOTTOM 1/3: LIST SECTION
+          Expanded(
+            child: _buildListSection(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildLocationCard(Map<String, dynamic> loc) {
-    final locId = loc['id'] as String;
-    final locName = loc['location_name'] as String? ?? '';
-    final names = _namesPerLocation[locId] ?? [];
-    final namesStr = names.isEmpty ? 'No names assigned' : names.join(', ');
-
-    return InkWell(
-      onTap: () => _editNamesForLocation(loc),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Row(
+  Widget _buildMapSection() {
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _selectedPoint,
+            initialZoom: 15,
+            onTap: (_, point) => setState(() => _selectedPoint = point),
+          ),
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.primaryNavy.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.location_on_rounded, color: AppColors.primaryNavy, size: 22),
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.vibro.app',
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    locName,
-                    style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    namesStr,
-                    style: AppTypography.bodySmall(color: AppColors.textSecondary),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 20),
-            IconButton(
-              icon: Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
-              onPressed: () => _deleteLocation(loc),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _selectedPoint,
+                  width: 80,
+                  height: 80,
+                  child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                ),
+              ],
             ),
           ],
         ),
-      ),
+
+        // Search Bar Floating
+        Positioned(
+          top: 16,
+          left: 16,
+          right: 16,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10)],
+            ),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search location...',
+                border: InputBorder.none,
+                icon: const Icon(Icons.search),
+                suffixIcon: _isSearching ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+              ),
+              onSubmitted: (_) => _searchAddress(),
+            ),
+          ),
+        ),
+
+        // GPS Button
+        Positioned(
+          bottom: 100,
+          right: 16,
+          child: FloatingActionButton.small(
+            onPressed: _goToCurrentLocation,
+            backgroundColor: Colors.white,
+            child: _isGettingGps 
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.my_location, color: AppColors.primaryNavy),
+          ),
+        ),
+
+        // Add Location Panel (Flush at bottom of map section)
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, -2))],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter name (e.g. Home)',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: _isSaving ? null : _saveLocation,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryNavy,
+                    foregroundColor: AppColors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  ),
+                  child: _isSaving 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Add'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildListSection() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_locations.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.location_off_rounded, size: 48, color: AppColors.textSecondary.withValues(alpha: 0.3)),
+            const SizedBox(height: 12),
+            Text('No locations yet', style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
+          ],
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: _locations.length,
+      separatorBuilder: (_, index) => const SizedBox(height: 12),
+      itemBuilder: (ctx, i) {
+        final loc = _locations[i];
+        final id = loc['id'] as String;
+        final name = loc['location_name'] as String? ?? '';
+        final names = _namesPerLocation[id] ?? [];
+        final namesStr = names.isEmpty ? 'No names assigned' : names.join(', ');
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFE8EAF6),
+              child: Icon(Icons.location_on, color: AppColors.primaryNavy, size: 20),
+            ),
+            title: Text(name, style: AppTypography.bodyMedium(color: AppColors.textPrimary).copyWith(fontWeight: FontWeight.bold)),
+            subtitle: Text(namesStr, style: AppTypography.bodySmall(color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(icon: const Icon(Icons.edit_outlined, size: 20), onPressed: () => _editNames(loc)),
+                IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.error), onPressed: () => _deleteLocation(loc)),
+              ],
+            ),
+            onTap: () => _editNames(loc),
+          ),
+        );
+      },
     );
   }
 }
 
-class _EditLocationNamesDialog extends StatefulWidget {
+class _EditNamesDialog extends StatefulWidget {
   final String locationName;
   final List<Map<String, dynamic>> allNames;
   final Set<String> selectedIds;
 
-  const _EditLocationNamesDialog({
-    required this.locationName,
-    required this.allNames,
-    required this.selectedIds,
-  });
+  const _EditNamesDialog({required this.locationName, required this.allNames, required this.selectedIds});
 
   @override
-  State<_EditLocationNamesDialog> createState() => _EditLocationNamesDialogState();
+  State<_EditNamesDialog> createState() => _EditNamesDialogState();
 }
 
-class _EditLocationNamesDialogState extends State<_EditLocationNamesDialog> {
+class _EditNamesDialogState extends State<_EditNamesDialog> {
   late Set<String> _selectedIds;
 
   @override
@@ -433,54 +406,26 @@ class _EditLocationNamesDialogState extends State<_EditLocationNamesDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppColors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Text(
-        'Names for ${widget.locationName}',
-        style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 18),
-      ),
+      title: Text('Names for ${widget.locationName}'),
       content: SizedBox(
         width: double.maxFinite,
-        child: widget.allNames.isEmpty
-            ? Text(
-                'Add names first in the Names tab.',
-                style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-              )
-            : SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: widget.allNames.map((n) {
-                    final id = n['id'] as String;
-                    final label = n['name_label'] as String? ?? '';
-                    return CheckboxListTile(
-                      value: _selectedIds.contains(id),
-                      onChanged: (v) {
-                        setState(() {
-                          if (v == true) {
-                            _selectedIds.add(id);
-                          } else {
-                            _selectedIds.remove(id);
-                          }
-                        });
-                      },
-                      title: Text(label, style: AppTypography.bodyMedium(color: AppColors.textPrimary)),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    );
-                  }).toList(),
-                ),
-              ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: widget.allNames.map((n) {
+              final id = n['id'] as String;
+              return CheckboxListTile(
+                title: Text(n['name_label']),
+                value: _selectedIds.contains(id),
+                onChanged: (v) => setState(() => v == true ? _selectedIds.add(id) : _selectedIds.remove(id)),
+              );
+            }).toList(),
+          ),
+        ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('Cancel', style: AppTypography.bodyMedium(color: AppColors.textSecondary)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(_selectedIds),
-          child: Text('Save', style: AppTypography.bodyMedium(color: AppColors.primaryNavy).copyWith(fontWeight: FontWeight.w600)),
-        ),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, _selectedIds), child: const Text('Save')),
       ],
     );
   }

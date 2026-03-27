@@ -1,5 +1,6 @@
 // VIBRO Location Service — CRUD for locations & name mapping
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../constants/app_constants.dart';
 
 class LocationService {
@@ -24,7 +25,12 @@ class LocationService {
   }
 
   /// Create a new location (max 3)
-  Future<Map<String, dynamic>> createLocation(String locationName) async {
+  Future<Map<String, dynamic>> createLocation({
+    required String locationName,
+    double? latitude,
+    double? longitude,
+    double radius = 100.0,
+  }) async {
     if (_userId == null) throw Exception('Not authenticated');
 
     final trimmed = locationName.trim();
@@ -41,7 +47,13 @@ class LocationService {
 
     final response = await _client
         .from('locations')
-        .insert({'user_id': _userId!, 'location_name': trimmed})
+        .insert({
+          'user_id': _userId!,
+          'location_name': trimmed,
+          'latitude': latitude,
+          'longitude': longitude,
+          'radius': radius,
+        })
         .select()
         .single();
 
@@ -115,5 +127,72 @@ class LocationService {
         .map((m) => m['name_label'] as String? ?? '')
         .where((s) => s.isNotEmpty)
         .toList();
+  }
+
+  /// Get current GPS position with permission handling
+  Future<Position?> getCurrentPosition() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return null;
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return null;
+    }
+
+    if (permission == LocationPermission.deniedForever) return null;
+
+    return await Geolocator.getCurrentPosition();
+  }
+
+  /// Check which location geofence the user is currently in
+  Map<String, dynamic>? findActiveLocation(
+      Position pos, List<Map<String, dynamic>> locations) {
+    for (final loc in locations) {
+      final double? lat = loc['latitude'] != null ? (loc['latitude'] as num).toDouble() : null;
+      final double? lon = loc['longitude'] != null ? (loc['longitude'] as num).toDouble() : null;
+      final double radius = loc['radius'] != null ? (loc['radius'] as num).toDouble() : 100.0;
+
+      if (lat != null && lon != null) {
+        final distance = Geolocator.distanceBetween(pos.latitude, pos.longitude, lat, lon);
+        if (distance <= radius) {
+          return loc;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Get a map of NameLabel -> List of LocationIds it belongs to
+  Future<Map<String, List<String>>> getNameToLocationMap() async {
+    if (_userId == null) return {};
+
+    final response = await _client
+        .from('location_name_mapping')
+        .select('location_id, trained_name_id');
+
+    final mappedIds = (response as List);
+    if (mappedIds.isEmpty) return {};
+
+    final names = await _client
+        .from('trained_names')
+        .select('id, name_label')
+        .inFilter('id', mappedIds.map((m) => m['trained_name_id']).toList());
+
+    final Map<String, String> idToLabel = {
+      for (final n in names as List) n['id'] as String: n['name_label'] as String
+    };
+
+    final Map<String, List<String>> result = {};
+    for (final m in mappedIds) {
+      final label = idToLabel[m['trained_name_id']];
+      if (label != null) {
+        result.putIfAbsent(label, () => []).add(m['location_id'] as String);
+      }
+    }
+    return result;
   }
 }

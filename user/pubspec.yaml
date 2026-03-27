@@ -49,6 +49,10 @@ dependencies:
   shared_preferences: ^2.3.2
   uuid: ^4.5.1
   http: ^1.2.2
+  geolocator: ^13.0.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  geocoding: ^3.0.0
   
   # Navigation
   go_router: ^14.3.0

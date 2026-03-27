@@ -9,8 +9,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/app_constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 import 'recognition_service.dart';
 import 'name_service.dart';
+import 'location_service.dart';
 
 class BackgroundService {
   static const String channelId = 'vibro_background';
@@ -59,7 +61,7 @@ class BackgroundService {
         notificationChannelId: channelId,
         initialNotificationTitle: notificationTitle,
         initialNotificationContent: notificationContent,
-        foregroundServiceTypes: [AndroidForegroundType.microphone],
+        foregroundServiceTypes: [AndroidForegroundType.microphone, AndroidForegroundType.location],
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,
@@ -85,6 +87,7 @@ void onStart(ServiceInstance service) async {
 
   final recognition = RecognitionService.instance;
   final nameService = NameService.instance;
+  final locationService = LocationService.instance;
 
   // 2. Fetch names to monitor
   final namesData = await nameService.getNames();
@@ -92,6 +95,10 @@ void onStart(ServiceInstance service) async {
       .map((n) => (n['name_label'] as String?) ?? '')
       .where((s) => s.isNotEmpty)
       .toSet();
+
+  // Fetch location mapping
+  Map<String, List<String>> nameToLocMap = await locationService.getNameToLocationMap();
+  List<Map<String, dynamic>> allLocations = await locationService.getLocations();
 
   if (names.isEmpty) {
     service.stopSelf();
@@ -109,6 +116,28 @@ void onStart(ServiceInstance service) async {
 
   // 4. Listen for detection events
   recognition.detectionStream.listen((event) async {
+    // LOCATION FILTERING LOGIC
+    final mappedLocs = nameToLocMap[event.name];
+    if (mappedLocs != null && mappedLocs.isNotEmpty) {
+      print('DEBUG BG: "${event.name}" is location-restricted: $mappedLocs');
+      
+      // Get current location
+      final Position? currentPos = await locationService.getCurrentPosition();
+      if (currentPos == null) {
+        print('DEBUG BG: Could not get location, suppressing restricted name');
+        return; 
+      }
+
+      final activeLoc = locationService.findActiveLocation(currentPos, allLocations);
+      if (activeLoc == null || !mappedLocs.contains(activeLoc['id'])) {
+        print('DEBUG BG: Not in required location for "${event.name}". (Active: ${activeLoc?['location_name']})');
+        return; // Suppress
+      }
+      print('DEBUG BG: Location MATCH for "${event.name}" at ${activeLoc['location_name']}');
+    } else {
+      print('DEBUG BG: "${event.name}" is set to ALWAYS trigger');
+    }
+
     // Start/Reset notification captioning window
     isCapturingNotification = true;
     capturingTimer?.cancel();
@@ -151,6 +180,11 @@ void onStart(ServiceInstance service) async {
       final List namesList = event['names'] as List;
       final newNames = namesList.map((e) => e.toString().toLowerCase()).toSet();
       print('DEBUG BG: Updating names to: $newNames');
+      
+      // Refresh location mapping cache
+      nameToLocMap = await locationService.getNameToLocationMap();
+      allLocations = await locationService.getLocations();
+      
       await recognition.initialize(newNames);
       recognition.startListening();
     }
