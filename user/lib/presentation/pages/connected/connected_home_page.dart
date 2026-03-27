@@ -434,45 +434,48 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildBody(List<Map<String, dynamic>> relations) {
-    return Column(children: [
-      // BLE status banner
-      if (_bleStatus != PhoneBleStatus.paired) _buildBleBanner(),
+    return SingleChildScrollView(
+      child: Column(children: [
+        // BLE status banner
+        if (_bleStatus != PhoneBleStatus.paired) _buildBleBanner(),
 
-      // Mic section
-      Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        child: _buildMicSection(),
-      ),
-
-      // Relation cards
-      if (relations.isNotEmpty)
+        // Mic section
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: _buildRelationCards(relations),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: _buildMicSection(),
         ),
 
-      const SizedBox(height: 14),
+        // Relation cards
+        if (relations.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: _buildRelationCards(relations),
+          ),
 
-      // Log header
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Row(children: [
-          Text('Detection Log',
-              style: AppTypography.sectionTitle(color: AppColors.textPrimary)
-                  .copyWith(fontSize: 15)),
-          const Spacer(),
-          if (_localLog.isNotEmpty)
-            GestureDetector(
-              onTap: () => setState(() => _localLog.clear()),
-              child: Text('Clear',
-                  style: AppTypography.bodySmall(color: AppColors.primaryNavy)
-                      .copyWith(fontWeight: FontWeight.w600)),
-            ),
-        ]),
-      ),
-      const SizedBox(height: 8),
-      Expanded(child: _localLog.isEmpty ? _buildEmptyLog() : _buildLogList()),
-    ]);
+        const SizedBox(height: 14),
+
+        // Log header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Text('Detection Log',
+                style: AppTypography.sectionTitle(color: AppColors.textPrimary)
+                    .copyWith(fontSize: 15)),
+            const Spacer(),
+            if (_localLog.isNotEmpty)
+              GestureDetector(
+                onTap: () => setState(() => _localLog.clear()),
+                child: Text('Clear',
+                    style: AppTypography.bodySmall(color: AppColors.primaryNavy)
+                        .copyWith(fontWeight: FontWeight.w600)),
+              ),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        _localLog.isEmpty ? _buildEmptyLog() : _buildLogList(),
+        const SizedBox(height: 40),
+      ]),
+    );
   }
 
   // ── BLE status banner ────────────────────────────────────────────────────
@@ -670,7 +673,9 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
 
   // ── Empty log ─────────────────────────────────────────────────────────────
   Widget _buildEmptyLog() {
-    return Center(
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      alignment: Alignment.center,
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(
           _isListening ? Icons.hearing_rounded : Icons.format_list_bulleted_rounded,
@@ -688,6 +693,8 @@ class _ConnectedHomePageState extends ConsumerState<ConnectedHomePage>
   // ── Detection log ─────────────────────────────────────────────────────────
   Widget _buildLogList() {
     return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20),
       itemCount: _localLog.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),

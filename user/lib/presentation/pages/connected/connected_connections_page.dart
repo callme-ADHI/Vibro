@@ -17,6 +17,12 @@ class _ConnectedConnectionsPageState extends ConsumerState<ConnectedConnectionsP
   bool _isLoading = false;
   Map<String, dynamic>? _foundUser;
 
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => ref.read(connectionProvider.notifier).loadConnections());
+  }
+
   Future<void> _lookupUser() async {
     final id = _controller.text.trim().toUpperCase();
     if (id.length != 6) {
