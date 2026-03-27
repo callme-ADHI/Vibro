@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import '../../core/theme/app_colors.dart';
@@ -13,9 +14,8 @@ class LiveCaptionsPage extends StatefulWidget {
 }
 
 class _LiveCaptionsPageState extends State<LiveCaptionsPage> {
-  final SpeechToText _speechToText = SpeechToText();
-  bool _speechEnabled = false;
   bool _isListening = false;
+  bool _speechEnabled = true;
   
   String _currentWords = '';
   final List<String> _completedSentences = [];
@@ -33,54 +33,50 @@ class _LiveCaptionsPageState extends State<LiveCaptionsPage> {
   }
 
   void _initSpeech() async {
-    _speechEnabled = await _speechToText.initialize(
-      onStatus: (status) {
-        if (status == 'done') {
-          // Restart listening automatically if it was meant to be continuous
-          if (_isListening) {
-             _startListening();
-          }
+    final service = FlutterBackgroundService();
+    
+    // Check if running
+    _isListening = await service.isRunning();
+    
+    // Listen for transcription
+    service.on('onTranscription').listen((event) {
+      if (!mounted) return;
+      
+      final String text = event?['text'] as String? ?? '';
+      final bool isFinal = event?['isFinal'] as bool? ?? false;
+
+      setState(() {
+        if (isFinal) {
+           if (text.isNotEmpty) _completedSentences.add(text);
+           _currentWords = '';
+        } else {
+           _currentWords = text;
         }
-      },
-      onError: (errorNotification) {
-        if (_isListening) {
-           Future.delayed(const Duration(milliseconds: 500), () {
-             if (mounted && _isListening) _startListening();
-           });
-        }
-      },
-    );
+      });
+      _scrollToBottom();
+    });
+
+    // Periodically check status
+    Timer.periodic(const Duration(seconds: 1), (timer) async {
+       if (!mounted) {
+         timer.cancel();
+         return;
+       }
+       final isRunning = await service.isRunning();
+       if (isRunning != _isListening) {
+         setState(() => _isListening = isRunning);
+       }
+    });
+
     if (mounted) setState(() {});
   }
 
   void _startListening() async {
-    await _speechToText.listen(
-      onResult: _onSpeechResult,
-      listenFor: const Duration(hours: 1), // Listen as much as possible
-      pauseFor: const Duration(seconds: 3), // Pause before considering sentence done
-      partialResults: true,
-      localeId: "en_US",
-      cancelOnError: false,
-      listenMode: ListenMode.dictation,
-    );
-    if (mounted) {
-      setState(() {
-        _isListening = true;
-      });
-    }
+    await FlutterBackgroundService().startService();
   }
 
   void _stopListening() async {
-    await _speechToText.stop();
-    if (mounted) {
-      setState(() {
-        _isListening = false;
-        if (_currentWords.isNotEmpty) {
-           _completedSentences.add(_currentWords);
-           _currentWords = '';
-        }
-      });
-    }
+    FlutterBackgroundService().invoke('stopService');
   }
 
   void _onSpeechResult(SpeechRecognitionResult result) {
@@ -108,7 +104,6 @@ class _LiveCaptionsPageState extends State<LiveCaptionsPage> {
 
   @override
   void dispose() {
-    _speechToText.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -313,7 +308,7 @@ class _LiveCaptionsPageState extends State<LiveCaptionsPage> {
                   ),
                 ),
                 GestureDetector(
-                  onTap: _speechEnabled ? _toggleListening : null,
+                  onTap: _toggleListening,
                   child: Container(
                     width: 64,
                     height: 64,

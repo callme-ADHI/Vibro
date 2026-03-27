@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:vibration/vibration.dart';
 import '../../core/services/recognition_service.dart';
 import '../../core/services/name_service.dart';
@@ -92,34 +93,41 @@ class _ListeningPageState extends State<ListeningPage>
     });
     _isBleConnected = _bleService.isConnected; // Initial check
     
-    // Subscribe to Service Streams
-    _stateSub = _recognition.stateStream.listen((state) {
+    // Subscribe to Background Service Events
+    FlutterBackgroundService().on('onDetection').listen((event) {
       if (!mounted) return;
-      setState(() => _recState = state);
       
-      if (_isListening) {
-        if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
-      } else {
-        _pulseCtrl.stop();
-        _pulseCtrl.reset();
-      }
-    });
+      final name = event?['name'] as String? ?? 'Unknown';
+      final confidence = (event?['confidence'] as num?)?.toDouble() ?? 0.0;
+      final detEvent = DetectionEvent(
+        name: name,
+        confidence: confidence,
+        timestamp: DateTime.now(),
+      );
 
-    _detectionSub = _recognition.detectionStream.listen((event) {
-      if (!mounted) return;
-      
       setState(() {
-        _detections.insert(0, event);
+        _detections.insert(0, detEvent);
         if (_detections.length > 50) _detections.removeLast();
       });
 
-      // Feedback & History
-      _triggerFeedback(event);
+      _triggerFeedback(detEvent);
+      
+      // History is handled here in the UI isolate for now
       HistoryService.instance.insertDetection(
-          nameLabel: event.name,
-          confidence: event.confidence,
+          nameLabel: detEvent.name,
+          confidence: detEvent.confidence,
           locationId: _selectedLocationId == _allNamesId ? null : _selectedLocationId,
       );
+    });
+
+    // Check service status
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final isRunning = await FlutterBackgroundService().isRunning();
+      if (mounted && isRunning != (_recState == RecognitionState.LISTENING)) {
+        setState(() {
+          _recState = isRunning ? RecognitionState.LISTENING : RecognitionState.IDLE;
+        });
+      }
     });
   }
 
@@ -159,6 +167,11 @@ class _ListeningPageState extends State<ListeningPage>
           _isReady = _availableNames.isNotEmpty;
           if (!silent) _isLoading = false;
         });
+      }
+      
+      // Update background service with names if it's already running
+      if (await FlutterBackgroundService().isRunning()) {
+        FlutterBackgroundService().invoke('updateNames', {'names': _selectedNames.toList()});
       }
     } catch (e) {
       if (mounted && !silent) {
@@ -208,23 +221,13 @@ class _ListeningPageState extends State<ListeningPage>
   }
 
   void _startListening() async {
-    // 1. Initialize with current names
-    final initialized = await _recognition.initialize(_selectedNames);
-    if (!initialized) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Speech recognition not available')),
-        );
-      }
-      return;
-    }
-
-    // 2. Start
-    _recognition.startListening();
+    // 1. Start Background Service (this handles initialization and detection)
+    final service = FlutterBackgroundService();
+    await service.startService();
   }
 
   void _stopListening() {
-    _recognition.stopListening();
+    FlutterBackgroundService().invoke('stopService');
   }
   
   Future<void> _triggerFeedback(DetectionEvent event) async {

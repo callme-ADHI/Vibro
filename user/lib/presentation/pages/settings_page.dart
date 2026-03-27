@@ -1,6 +1,8 @@
 // VIBRO Settings Page — User preferences + username edit
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
@@ -19,12 +21,50 @@ class _SettingsPageState extends State<SettingsPage> {
   String _username = '';
   String _email = '';
   int _locationCount = 0;
+  bool _autoOpenEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
     _loadLocationCount();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _autoOpenEnabled = prefs.getBool('auto_open_enabled') ?? true;
+      });
+    }
+  }
+
+  Future<void> _toggleAutoOpen(bool value) async {
+    if (value) {
+      // Check Overlay Permission (SYSTEM_ALERT_WINDOW)
+      final status = await Permission.systemAlertWindow.status;
+      if (!status.isGranted) {
+        final result = await Permission.systemAlertWindow.request();
+        if (!result.isGranted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Overlay permission is required for auto-open.'),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+          return;
+        }
+      }
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('auto_open_enabled', value);
+    if (mounted) {
+      setState(() => _autoOpenEnabled = value);
+    }
   }
 
   Future<void> _loadLocationCount() async {
@@ -271,6 +311,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
                 subtitle: 'Enabled',
+              ),
+              _buildSettingsTile(
+                icon: Icons.open_in_new_rounded,
+                title: 'Auto-Open App',
+                subtitle: 'Foreground app on name detection',
+                trailing: Transform.scale(
+                  scale: 0.8,
+                  child: Switch(
+                    value: _autoOpenEnabled,
+                    onChanged: _toggleAutoOpen,
+                    activeColor: AppColors.primaryNavy,
+                  ),
+                ),
               ),
             ]),
 

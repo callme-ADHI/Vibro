@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../main.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/constants/app_constants.dart';
@@ -42,12 +44,59 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
 
     _controller.forward();
 
-    Timer(const Duration(seconds: 3), () {
+    _checkForAutoOpen();
+  }
+
+  Future<void> _checkForAutoOpen() async {
+    // 1. Check if launched via Notification Tap (from main.dart globals)
+    if (notificationAutoOpen) {
+      if (mounted) {
+        notificationAutoOpen = false; // consume
+        _navigateToNextScreen(isAutoOpen: true);
+        return;
+      }
+    }
+
+    // 2. Check SharedPreferences flag (set by background service isolate on detection)
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingOpen = prefs.getBool('pending_auto_open') ?? false;
+      if (pendingOpen) {
+        await prefs.setBool('pending_auto_open', false); // consume the flag
+        if (mounted) {
+          _navigateToNextScreen(isAutoOpen: true);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Fallback: Check Native MethodChannel 
+    final channel = const MethodChannel('com.vibro.app/launch');
+    
+    // Listen for future native triggers (if already open)
+    channel.setMethodCallHandler((call) async {
+       if (call.method == "onAutoOpenTriggered") {
+         if (mounted) _navigateToNextScreen(isAutoOpen: true);
+       }
+    });
+
+    try {
+      final bool autoOpen = await channel.invokeMethod('getAutoOpen') ?? false;
+      if (autoOpen) {
+        if (mounted) {
+          _navigateToNextScreen(isAutoOpen: true);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // Default splash duration
+    Timer(const Duration(milliseconds: 1500), () {
       if (mounted) _navigateToNextScreen();
     });
   }
 
-  void _navigateToNextScreen() {
+  void _navigateToNextScreen({bool isAutoOpen = false}) {
     // Reset to light status bar for rest of app
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -59,7 +108,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainShell()),
+        MaterialPageRoute(builder: (_) => MainShell(initialIndex: isAutoOpen ? 3 : 0)),
       );
     } else {
       Navigator.of(context).pushReplacement(

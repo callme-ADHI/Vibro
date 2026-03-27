@@ -30,6 +30,10 @@ class RecognitionService {
   final StreamController<DetectionEvent> _detectionController = StreamController.broadcast();
   Stream<DetectionEvent> get detectionStream => _detectionController.stream;
 
+  // Transcription Stream
+  final StreamController<Map<String, dynamic>> _transcriptionController = StreamController.broadcast();
+  Stream<Map<String, dynamic>> get transcriptionStream => _transcriptionController.stream;
+
   // 🎛 STATE VARIABLES
   bool _isInitialized = false;
   bool _isListening = false;
@@ -58,23 +62,25 @@ class RecognitionService {
     }
 
     try {
+      print('DEBUG ASR: Calling _speech.initialize()...');
       _isInitialized = await _speech.initialize(
         onError: _handleError,
         onStatus: _handleStatus,
-        debugLogging: true, // Helpful for debugging
+        debugLogging: true,
       );
 
       if (!_isInitialized) {
-        print("ASR Initialization failed");
+        print("DEBUG ASR: _speech.initialize() returned false");
         _updateState(RecognitionState.ERROR);
         return false;
       }
       
-      print("ASR Initialized");
+      print("DEBUG ASR: _speech.initialize() success");
       _updateState(RecognitionState.IDLE);
       return true;
-    } catch (e) {
-      print('ERROR: Speech Init Failed: $e');
+    } catch (e, stack) {
+      print('ERROR ASR: Speech Init Failed: $e');
+      print('STACK ASR: $stack');
       _updateState(RecognitionState.ERROR);
       return false;
     }
@@ -133,7 +139,7 @@ class RecognitionService {
         listenFor: _listenDuration,
         pauseFor: _pauseDuration,
         partialResults: true,
-        listenMode: ListenMode.confirmation,
+        listenMode: ListenMode.dictation,
         cancelOnError: true, // We catch in onError
       );
     } catch (e) {
@@ -149,10 +155,12 @@ class RecognitionService {
     _updateState(RecognitionState.PROCESSING);
 
     final text = result.recognizedWords.toLowerCase();
+    print('DEBUG ASR: HandleResult: "$text" (final: ${result.finalResult})');
     
     // Check for names
     for (final name in _activeNames) {
       if (text.contains(name)) {
+        print('DEBUG ASR: MATCH FOUND for name: "$name"');
         double confidence = result.confidence;
         // Fix: Android often returns -1.0 or 0.0, use default high if matched
         if (confidence <= 0.0) confidence = 0.85; 
@@ -160,6 +168,12 @@ class RecognitionService {
         _triggerDetection(name, confidence);
       }
     }
+    
+    // Emit transcription for UI
+    _transcriptionController.add({
+      'text': result.recognizedWords,
+      'isFinal': result.finalResult,
+    });
     
     // If not final, we are still listening
     if (!result.finalResult) {
@@ -215,6 +229,7 @@ class RecognitionService {
 
     // Handle Timeouts (Silence) as normal cycle
     if (error.errorMsg == 'error_speech_timeout' || error.errorMsg == 'error_no_match') {
+       print('DEBUG ASR: Non-fatal error (${error.errorMsg}), scheduling restart...');
        _scheduleRestart();
        return;
     }
@@ -222,10 +237,11 @@ class RecognitionService {
     // Genuine errors (busy, client, etc.)
     _updateState(RecognitionState.ERROR);
     
-    if (error.permanent) {
+    // Some errors might be reported as permanent but are often transient in background
+    if (error.permanent && error.errorMsg != 'error_busy') {
       _restartAttempts++;
       if (_restartAttempts > _maxRestartAttempts) {
-        print('CRITICAL: Max restart attempts reached. Stopping ASR.');
+        print('CRITICAL ASR: Max restart attempts reached for ${error.errorMsg}. Stopping.');
         stopListening();
         return;
       }
@@ -281,5 +297,6 @@ class RecognitionService {
     stopListening();
     _stateController.close();
     _detectionController.close();
+    _transcriptionController.close();
   }
 }
