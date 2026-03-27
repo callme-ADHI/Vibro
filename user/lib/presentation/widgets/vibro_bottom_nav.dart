@@ -65,9 +65,9 @@ class VibroBottomNav extends StatelessWidget {
               ),
               _buildNavItem(
                 index: 4,
-                icon: Icons.sensors_outlined, // Was settings
-                activeIcon: Icons.sensors_rounded,
-                label: 'Connectivity', // Was settings
+                icon: Icons.group_outlined,
+                activeIcon: Icons.group_rounded,
+                label: 'Connect',
               ),
             ],
           ),

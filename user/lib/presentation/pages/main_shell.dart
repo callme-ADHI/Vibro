@@ -7,7 +7,6 @@ import 'home_page.dart';
 import 'names_page.dart';
 import 'listening_page.dart';
 import 'live_captions_page.dart';
-import 'connectivity_page.dart';
 import 'settings_page.dart';
 import 'connections_page.dart';
 import 'profile_page.dart';
@@ -28,7 +27,7 @@ class _MainShellState extends State<MainShell> {
     LiveCaptionsPage(),
     ListeningPage(),
     NamesPage(),
-    ConnectivityPage(),
+    ConnectionsPage(),
   ];
 
   @override
