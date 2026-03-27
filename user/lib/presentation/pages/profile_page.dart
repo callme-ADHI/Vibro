@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/auth_service.dart';
@@ -10,6 +11,7 @@ import '../../core/services/location_service.dart';
 import 'login_page.dart';
 import 'locations_page.dart';
 import '../../features/auth/screens/login_screen.dart';
+import 'subscription_page.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -20,11 +22,13 @@ class ProfilePage extends ConsumerStatefulWidget {
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
   int _locationCount = 0;
+  double _sensitivity = 0.5; // 0.0=Low, 0.33=Normal, 0.67=High, 1.0=Max
 
   @override
   void initState() {
     super.initState();
     _loadLocationCount();
+    _loadSensitivity();
   }
 
   Future<void> _loadLocationCount() async {
@@ -32,6 +36,26 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       final locs = await LocationService.instance.getLocations();
       if (mounted) setState(() => _locationCount = locs.length);
     } catch (_) {}
+  }
+
+  Future<void> _loadSensitivity() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() => _sensitivity = prefs.getDouble('detection_sensitivity') ?? 0.5);
+    }
+  }
+
+  Future<void> _saveSensitivity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('detection_sensitivity', value);
+    if (mounted) setState(() => _sensitivity = value);
+  }
+
+  String _sensitivityLabel() {
+    if (_sensitivity <= 0.15) return 'Low';
+    if (_sensitivity <= 0.45) return 'Normal';
+    if (_sensitivity <= 0.75) return 'High';
+    return 'Max';
   }
 
   Future<void> _editUsername(String currentName) async {
@@ -250,15 +274,19 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   _loadLocationCount();
                 },
               ),
-              _buildSettingsTile(
-                icon: Icons.tune_rounded,
-                title: 'Sensitivity',
-                subtitle: 'Normal',
-              ),
+              _buildSensitivitySlider(),
               _buildSettingsTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
                 subtitle: 'Enabled',
+              ),
+              _buildSettingsTile(
+                icon: Icons.workspace_premium_rounded,
+                title: 'Subscription',
+                subtitle: 'Basic plan',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+                ),
               ),
             ]),
 
@@ -348,5 +376,70 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14), child: content);
     }
     return content;
+  }
+
+  Widget _buildSensitivitySlider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tune_rounded, color: AppColors.primaryNavy, size: 22),
+              const SizedBox(width: 14),
+              Text(
+                'Detection Sensitivity',
+                style: AppTypography.bodyMedium(color: AppColors.textPrimary)
+                    .copyWith(fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _sensitivityLabel(),
+                  style: AppTypography.metadata(color: AppColors.primaryNavy)
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: AppColors.primaryNavy,
+              inactiveTrackColor: AppColors.divider,
+              thumbColor: AppColors.primaryNavy,
+              overlayColor: AppColors.primaryNavy.withValues(alpha: 0.1),
+              trackHeight: 4,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+            ),
+            child: Slider(
+              value: _sensitivity,
+              min: 0.0,
+              max: 1.0,
+              divisions: 3,
+              onChanged: (v) => _saveSensitivity(v),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Low', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('Normal', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('High', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('Max', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

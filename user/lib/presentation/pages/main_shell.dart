@@ -22,12 +22,18 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   late int _currentIndex;
 
-  List<Widget> get _pages => const [
-    HomePage(),
-    LiveCaptionsPage(),
-    ListeningPage(),
-    NamesPage(),
-    ConnectionsPage(),
+  void _navigateToTab(int index) {
+    if (mounted && index >= 0 && index < 5) {
+      setState(() => _currentIndex = index);
+    }
+  }
+
+  List<Widget> get _pages => [
+    HomePage(onNavigateToTab: _navigateToTab),
+    const LiveCaptionsPage(),
+    const ListeningPage(),
+    const NamesPage(),
+    const ConnectionsPage(),
   ];
 
   @override

@@ -4,6 +4,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/name_service.dart';
 import 'add_name_page.dart';
+import 'model_detail_page.dart';
 
 class NamesPage extends StatefulWidget {
   const NamesPage({super.key});
@@ -295,7 +296,21 @@ class _NamesPageState extends State<NamesPage> {
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Container(
+            child: GestureDetector(
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ModelDetailPage(
+                      nameId: nameId,
+                      nameLabel: nameLabel,
+                      clipCount: clipCount,
+                      audioStatus: status,
+                    ),
+                  ),
+                );
+                _loadNames();
+              },
+              child: Container(
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(14),
@@ -395,6 +410,7 @@ class _NamesPageState extends State<NamesPage> {
                   ],
                 ),
               ),
+            ),
             ),
           );
         },

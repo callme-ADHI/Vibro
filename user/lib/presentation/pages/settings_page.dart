@@ -1,7 +1,6 @@
 // VIBRO Settings Page — User preferences + username edit
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -9,6 +8,7 @@ import '../../core/services/auth_service.dart';
 import '../../core/services/location_service.dart';
 import '../../features/auth/screens/login_screen.dart';
 import 'locations_page.dart';
+import 'subscription_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -21,50 +21,34 @@ class _SettingsPageState extends State<SettingsPage> {
   String _username = '';
   String _email = '';
   int _locationCount = 0;
-  bool _autoOpenEnabled = true;
+  double _sensitivity = 0.5;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
     _loadLocationCount();
-    _loadSettings();
+    _loadSensitivity();
   }
 
-  Future<void> _loadSettings() async {
+  Future<void> _loadSensitivity() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
-      setState(() {
-        _autoOpenEnabled = prefs.getBool('auto_open_enabled') ?? true;
-      });
+      setState(() => _sensitivity = prefs.getDouble('detection_sensitivity') ?? 0.5);
     }
   }
 
-  Future<void> _toggleAutoOpen(bool value) async {
-    if (value) {
-      // Check Overlay Permission (SYSTEM_ALERT_WINDOW)
-      final status = await Permission.systemAlertWindow.status;
-      if (!status.isGranted) {
-        final result = await Permission.systemAlertWindow.request();
-        if (!result.isGranted) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Overlay permission is required for auto-open.'),
-                backgroundColor: AppColors.error,
-              ),
-            );
-          }
-          return;
-        }
-      }
-    }
-
+  Future<void> _saveSensitivity(double value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('auto_open_enabled', value);
-    if (mounted) {
-      setState(() => _autoOpenEnabled = value);
-    }
+    await prefs.setDouble('detection_sensitivity', value);
+    if (mounted) setState(() => _sensitivity = value);
+  }
+
+  String _sensitivityLabel() {
+    if (_sensitivity <= 0.15) return 'Low';
+    if (_sensitivity <= 0.45) return 'Normal';
+    if (_sensitivity <= 0.75) return 'High';
+    return 'Max';
   }
 
   Future<void> _loadLocationCount() async {
@@ -302,28 +286,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   _loadLocationCount();
                 },
               ),
-              _buildSettingsTile(
-                icon: Icons.tune_rounded,
-                title: 'Sensitivity',
-                subtitle: 'Normal',
-              ),
+              _buildSensitivitySlider(),
               _buildSettingsTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
                 subtitle: 'Enabled',
-              ),
-              _buildSettingsTile(
-                icon: Icons.open_in_new_rounded,
-                title: 'Auto-Open App',
-                subtitle: 'Foreground app on name detection',
-                trailing: Transform.scale(
-                  scale: 0.8,
-                  child: Switch(
-                    value: _autoOpenEnabled,
-                    onChanged: _toggleAutoOpen,
-                    activeColor: AppColors.primaryNavy,
-                  ),
-                ),
               ),
             ]),
 
@@ -337,6 +304,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.workspace_premium_rounded,
                 title: 'Subscription',
                 subtitle: 'Basic plan',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+                ),
               ),
             ]),
 
@@ -470,5 +440,70 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     }
     return content;
+  }
+
+  Widget _buildSensitivitySlider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tune_rounded, color: AppColors.primaryNavy, size: 22),
+              const SizedBox(width: 14),
+              Text(
+                'Detection Sensitivity',
+                style: AppTypography.bodyMedium(color: AppColors.textPrimary)
+                    .copyWith(fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryNavy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _sensitivityLabel(),
+                  style: AppTypography.metadata(color: AppColors.primaryNavy)
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: AppColors.primaryNavy,
+              inactiveTrackColor: AppColors.divider,
+              thumbColor: AppColors.primaryNavy,
+              overlayColor: AppColors.primaryNavy.withValues(alpha: 0.1),
+              trackHeight: 4,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+            ),
+            child: Slider(
+              value: _sensitivity,
+              min: 0.0,
+              max: 1.0,
+              divisions: 3,
+              onChanged: (v) => _saveSensitivity(v),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Low', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('Normal', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('High', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+                Text('Max', style: AppTypography.metadata(color: AppColors.textSecondary).copyWith(fontSize: 10)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

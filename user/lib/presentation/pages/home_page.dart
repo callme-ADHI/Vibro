@@ -15,9 +15,12 @@ import 'locations_page.dart';
 import 'settings_page.dart';
 import 'history_page.dart';
 import 'ble_devices_page.dart';
+import 'detection_log_page.dart';
+import 'subscription_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
+  final void Function(int)? onNavigateToTab;
+  const HomePage({super.key, this.onNavigateToTab});
 
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
@@ -250,17 +253,29 @@ class _HomePageState extends ConsumerState<HomePage> {
               crossAxisSpacing: 12,
               childAspectRatio: 1.15,
               children: [
-                _buildFeatureCard(
-                  icon: Icons.record_voice_over_rounded,
-                  title: 'Voice Models',
-                  subtitle: '$_modelCount active',
-                  statusColor: _modelCount > 0 ? AppColors.success : AppColors.accentNavy,
+                GestureDetector(
+                  onTap: () {
+                    if (widget.onNavigateToTab != null) {
+                      widget.onNavigateToTab!(3);
+                    }
+                  },
+                  child: _buildFeatureCard(
+                    icon: Icons.record_voice_over_rounded,
+                    title: 'Voice Models',
+                    subtitle: '$_modelCount active',
+                    statusColor: _modelCount > 0 ? AppColors.success : AppColors.accentNavy,
+                  ),
                 ),
-                _buildFeatureCard(
-                  icon: Icons.history_rounded,
-                  title: 'Detections',
-                  subtitle: '$_detectionCount total',
-                  statusColor: _detectionCount > 0 ? AppColors.success : AppColors.textSecondary,
+                GestureDetector(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DetectionLogPage()),
+                  ),
+                  child: _buildFeatureCard(
+                    icon: Icons.history_rounded,
+                    title: 'Detections',
+                    subtitle: '$_detectionCount total',
+                    statusColor: _detectionCount > 0 ? AppColors.success : AppColors.textSecondary,
+                  ),
                 ),
                 GestureDetector(
                   onTap: () async {
@@ -340,31 +355,42 @@ class _HomePageState extends ConsumerState<HomePage> {
             _buildSectionHeader('Subscription'),
             const SizedBox(height: 12),
 
-            _buildCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryNavy,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'BASIC',
-                      style: AppTypography.metadata(color: AppColors.white).copyWith(
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.5,
-                        fontSize: 11,
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+              ),
+              child: _buildCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryNavy,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'BASIC',
+                        style: AppTypography.metadata(color: AppColors.white).copyWith(
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5,
+                          fontSize: 11,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    '3 Voice Models  •  2 Locations',
-                    style: AppTypography.bodyMedium(color: AppColors.textSecondary),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '3 Voice Models  •  2 Locations',
+                          style: AppTypography.bodyMedium(color: AppColors.textSecondary),
+                        ),
+                        const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary, size: 20),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
 
