@@ -22,7 +22,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   late int _currentIndex;
 
-  final List<Widget> _pages = const [
+  List<Widget> get _pages => const [
     HomePage(),
     LiveCaptionsPage(),
     ListeningPage(),
