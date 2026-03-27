@@ -155,13 +155,12 @@ class _ListeningPageState extends State<ListeningPage>
 
       List<String> namesData;
       if (_selectedLocationId == null || _selectedLocationId == _allNamesId) {
-        final rawNames = await _nameService.getNames();
-        namesData = rawNames
-            .map((n) => (n['name_label'] as String?) ?? '')
-            .where((s) => s.isNotEmpty)
-            .toList();
+        final trainedLabels = await _nameService.getTrainedNameLabels();
+        namesData = trainedLabels.toList();
       } else {
-        namesData = await _locationService.getNameLabelsForLocation(_selectedLocationId!);
+        final locationLabels = await _locationService.getNameLabelsForLocation(_selectedLocationId!);
+        final allTrainedLabels = await _nameService.getTrainedNameLabels();
+        namesData = locationLabels.where((l) => allTrainedLabels.contains(l)).toList();
       }
 
       if (mounted) {

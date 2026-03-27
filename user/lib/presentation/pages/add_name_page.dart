@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/services/name_service.dart';
 import '../../core/services/audio_recording_service.dart';
+import '../../core/services/training_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class AddNamePage extends StatefulWidget {
@@ -289,6 +290,9 @@ class _AddNamePageState extends State<AddNamePage> {
         nameId: _createdNameId!,
         samples: _samples,
       );
+
+      // Initialize training status record (Redundant with DB trigger for reliability)
+      await TrainingService.instance.initializeTrainingStatus(_createdNameId!);
 
       await AudioRecordingService.instance.cleanupTempFiles();
 

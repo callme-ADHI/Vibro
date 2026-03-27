@@ -89,12 +89,9 @@ void onStart(ServiceInstance service) async {
   final nameService = NameService.instance;
   final locationService = LocationService.instance;
 
-  // 2. Fetch names to monitor
-  final namesData = await nameService.getNames();
-  final names = namesData
-      .map((n) => (n['name_label'] as String?) ?? '')
-      .where((s) => s.isNotEmpty)
-      .toSet();
+  // 2. Fetch only names with COMPLETED training status to monitor
+  final names = await nameService.getTrainedNameLabels();
+  print('DEBUG BG: Active names (trained only): $names');
 
   // Fetch location mapping
   Map<String, List<String>> nameToLocMap = await locationService.getNameToLocationMap();

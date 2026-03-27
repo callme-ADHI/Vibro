@@ -65,6 +65,7 @@ class TrainingStatusData {
   final TrainingStatus status;
   final int progressPercentage;
   final int? modelVersion;
+  final double? accuracyMetric;
   final String? errorMessage;
   final DateTime updatedAt;
 
@@ -75,6 +76,7 @@ class TrainingStatusData {
     required this.status,
     required this.progressPercentage,
     this.modelVersion,
+    this.accuracyMetric,
     this.errorMessage,
     required this.updatedAt,
   });
@@ -87,6 +89,7 @@ class TrainingStatusData {
       status: TrainingStatus.fromString(json['status'] ?? 'NOT_STARTED'),
       progressPercentage: json['progress_percentage'] ?? 0,
       modelVersion: json['model_version'],
+      accuracyMetric: (json['accuracy_metric'] as num?)?.toDouble(),
       errorMessage: json['error_message'],
       updatedAt: DateTime.tryParse(json['updated_at'] ?? '') ?? DateTime.now(),
     );

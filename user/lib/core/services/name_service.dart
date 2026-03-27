@@ -23,6 +23,29 @@ class NameService {
     return List<Map<String, dynamic>>.from(response);
   }
 
+  /// Fetch only labels of names that have COMPLETED training
+  Future<Set<String>> getTrainedNameLabels() async {
+    if (_userId == null) return {};
+
+    try {
+      // Use user_training_status to check if model is COMPLETED
+      final response = await _client
+          .from('trained_names')
+          .select('name_label, user_training_status!inner(status)')
+          .eq('user_id', _userId!)
+          .eq('user_training_status.status', 'COMPLETED');
+
+      final List<dynamic> data = response as List<dynamic>;
+      return data
+          .map((n) => (n['name_label'] as String?) ?? '')
+          .where((s) => s.isNotEmpty)
+          .toSet();
+    } catch (e) {
+      print('DEBUG: Error fetching trained names: $e');
+      return {};
+    }
+  }
+
   /// Check if a name already exists for the current user
   Future<bool> nameExists(String nameLabel) async {
     if (_userId == null) throw Exception('Not authenticated');

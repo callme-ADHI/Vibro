@@ -21,6 +21,7 @@ class _TrainingStatusPageState extends State<TrainingStatusPage>
   bool _isLoading = true;
   bool _isDownloadingModel = false;
   int? _modelVersion;
+  double? _accuracyMetric;
 
   StreamSubscription<TrainingStatusData>? _subscription;
   late AnimationController _pulseController;
@@ -55,6 +56,7 @@ class _TrainingStatusPageState extends State<TrainingStatusPage>
           _progress = status.progressPercentage;
           _errorMessage = status.errorMessage;
           _modelVersion = status.modelVersion;
+          _accuracyMetric = status.accuracyMetric;
         }
       });
 
@@ -75,6 +77,7 @@ class _TrainingStatusPageState extends State<TrainingStatusPage>
           _progress = data.progressPercentage;
           _errorMessage = data.errorMessage;
           _modelVersion = data.modelVersion;
+          _accuracyMetric = data.accuracyMetric;
         });
 
         if (data.status == TrainingStatus.completed) {
@@ -240,6 +243,17 @@ class _TrainingStatusPageState extends State<TrainingStatusPage>
                 style: AppTypography.bodySmall(color: AppColors.white).copyWith(
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+            ),
+          ],
+
+          if (_accuracyMetric != null && _currentStatus == TrainingStatus.completed) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Training Accuracy: ${(_accuracyMetric! * 100).toStringAsFixed(1)}%',
+              style: AppTypography.bodyMedium(color: AppColors.success).copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
             ),
           ],
