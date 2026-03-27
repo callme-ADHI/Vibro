@@ -8,8 +8,8 @@
 
 #include <app_links/app_links_plugin_c_api.h>
 #include <audioplayers_windows/audioplayers_windows_plugin.h>
-#include <geolocator_windows/geolocator_windows.h>
 #include <bluetooth_low_energy_windows/bluetooth_low_energy_windows_plugin_c_api.h>
+#include <geolocator_windows/geolocator_windows.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
 #include <record_windows/record_windows_plugin_c_api.h>
 #include <speech_to_text_windows/speech_to_text_windows.h>
@@ -20,10 +20,10 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("AppLinksPluginCApi"));
   AudioplayersWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("AudioplayersWindowsPlugin"));
-  GeolocatorWindowsRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("GeolocatorWindows"));
   BluetoothLowEnergyWindowsPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("BluetoothLowEnergyWindowsPluginCApi"));
+  GeolocatorWindowsRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("GeolocatorWindows"));
   PermissionHandlerWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin"));
   RecordWindowsPluginCApiRegisterWithRegistrar(

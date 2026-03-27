@@ -257,7 +257,6 @@ class _ListeningPageState extends State<ListeningPage>
         behavior: SnackBarBehavior.floating,
       ));
     }
->>>>>>> origin/adhi
   }
 
   Future<void> _loadNamesAndInit({bool silent = false}) async {
