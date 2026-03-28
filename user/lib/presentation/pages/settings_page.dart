@@ -2,22 +2,23 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../core/services/auth_service.dart';
+import '../../features/auth/controllers/auth_controller.dart';
 import '../../core/services/location_service.dart';
 import '../../features/auth/screens/login_screen.dart';
 import 'locations_page.dart';
 import 'subscription_page.dart';
 
-class SettingsPage extends StatefulWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage> {
   String _username = '';
   String _email = '';
   int _locationCount = 0;
@@ -60,7 +61,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadProfile() async {
     final user = Supabase.instance.client.auth.currentUser;
-    final profile = await AuthService.instance.getUserProfile();
+    final profile = await ref.read(authServiceProvider).getUserProfile();
 
     if (mounted) {
       setState(() {
@@ -140,7 +141,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (newName != null && newName != _username) {
       try {
-        await AuthService.instance.updateUsername(newName);
+        await ref.read(authServiceProvider).updateUsername(newName);
         setState(() => _username = newName);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -281,7 +282,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: '$_locationCount locations configured',
                 onTap: () async {
                   await Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LocationsPage()),
+                    MaterialPageRoute(builder: (_) => LocationsPage()),
                   );
                   _loadLocationCount();
                 },
@@ -344,7 +345,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _signOut(BuildContext context) async {
     try {
-      await AuthService.instance.signOut();
+      await ref.read(authServiceProvider).signOut();
       if (context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),

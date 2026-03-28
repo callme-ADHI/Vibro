@@ -4,6 +4,7 @@ import '../controllers/auth_controller.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../presentation/pages/main_shell.dart';
 import '../../../../presentation/pages/connected/connected_main_shell.dart';
+import '../../../../core/services/service_manager.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -111,6 +112,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       // Route on successful auth using userType carried in state — no DB race
       if (next.isAuthenticated && !(previous?.isAuthenticated ?? false)) {
+        // Start services with the correct mode before navigating
+        ServiceManager.ensureStarted(mode: next.userType ?? 'deaf');
+
         if (next.userType == 'connected') {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const ConnectedMainShell()),

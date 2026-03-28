@@ -21,14 +21,15 @@ bool notificationAutoOpen = false;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Start ESP32 hardware BLE (wearable device connectivity)
+  // Initialize Supabase early so it's ready for all screens
+  await Supabase.initialize(
+    url: AppConstants.supabaseUrl,
+    anonKey: AppConstants.supabaseAnonKey,
+  );
+  print('DEBUG MAIN: Supabase initialized');
+
+  // Start Hardware Wearable BLE (if needed)
   BleService.instance.initialize();
-
-  // Initialize Background Service (flutter_background_service)
-  await BackgroundService.initialize();
-
-  // Start Android foreground service to keep WiFi + speech alive in bg
-  VibroForegroundService.instance.start(mode: 'deaf');
 
   // Initialize Local Notifications with tap handler
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -74,13 +75,6 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  print('DEBUG MAIN: Initializing Supabase...');
-  // Initialize Supabase
-  await Supabase.initialize(
-    url: AppConstants.supabaseUrl,
-    anonKey: AppConstants.supabaseAnonKey,
-  );
-  print('DEBUG MAIN: Supabase initialized');
 
   runApp(
     const ProviderScope(

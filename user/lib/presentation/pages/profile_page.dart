@@ -5,12 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../core/services/auth_service.dart';
+import '../../features/auth/services/auth_service.dart';
+import '../../features/auth/controllers/auth_controller.dart';
 import '../../core/providers/user_provider.dart';
 import '../../core/services/location_service.dart';
-import 'login_page.dart';
-import 'locations_page.dart';
 import '../../features/auth/screens/login_screen.dart';
+import 'locations_page.dart';
 import 'subscription_page.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
@@ -111,7 +111,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     if (newName != null && newName != currentName) {
       try {
-        await AuthService.instance.updateUsername(newName);
+        await ref.read(authServiceProvider).updateUsername(newName);
         ref.read(userProvider.notifier).updateNameLocally(newName);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -142,7 +142,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final String currentName = userProfile?['full_name'] ?? 'Loading...';
     final String email = userProfile?['email'] ?? '';
     final String userIdString = userProfile?['user_id'] ?? '...';
-    final String userType = userProfile?['user_type'] ?? 'deaf';
 
     return Scaffold(
       backgroundColor: AppColors.lightSurface,
@@ -270,7 +269,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 title: 'Location Mapping',
                 subtitle: '$_locationCount locations configured',
                 onTap: () async {
-                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LocationsPage()));
+                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => LocationsPage()));
                   _loadLocationCount();
                 },
               ),
@@ -316,7 +315,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Future<void> _signOut(BuildContext context) async {
     try {
       ref.read(userProvider.notifier).clearProfile();
-      await AuthService.instance.signOut();
+      await ref.read(authServiceProvider).signOut();
       if (context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),

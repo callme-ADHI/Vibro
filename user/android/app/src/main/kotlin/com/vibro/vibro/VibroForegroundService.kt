@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -47,7 +48,16 @@ class VibroForegroundService : Service() {
             }
             else -> {
                 val notification = buildNotification(mode)
-                startForeground(NOTIFICATION_ID, notification)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val typedService = if (mode == "deaf") {
+                         ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    } else {
+                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    }
+                    startForeground(NOTIFICATION_ID, notification, typedService)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
             }
         }
 

@@ -9,6 +9,7 @@ import '../../core/constants/app_constants.dart';
 import '../../features/auth/screens/login_screen.dart';
 import 'main_shell.dart';
 import 'connected/connected_main_shell.dart';
+import '../../core/services/service_manager.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -69,6 +70,9 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
       } catch (_) {}
 
       if (mounted) {
+         // Safely start services for returning user
+         await ServiceManager.ensureStarted(mode: userType);
+
          if (userType == 'connected') {
            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const ConnectedMainShell()));
          } else {

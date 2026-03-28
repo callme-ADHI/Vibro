@@ -88,4 +88,41 @@ class AuthService {
   User? getCurrentUser() {
     return _supabase.auth.currentUser;
   }
+
+  // Getters for status
+  bool get isLoggedIn => _supabase.auth.currentUser != null;
+  String? get currentEmail => _supabase.auth.currentUser?.email;
+  Stream<AuthState> get authStateStream => _supabase.auth.onAuthStateChange;
+
+  // Sign out
+  Future<void> signOut() async {
+    await _supabase.auth.signOut();
+  }
+
+  // Reset password
+  Future<void> resetPassword({required String email}) async {
+    await _supabase.auth.resetPasswordForEmail(email);
+  }
+
+  // Update full_name in profiles table
+  Future<void> updateUsername(String fullName) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw Exception('Not authenticated');
+
+    await _supabase.from('profiles').update({
+      'full_name': fullName,
+    }).eq('id', user.id);
+  }
+
+  // Get user profile (legacy support)
+  Future<Map<String, dynamic>?> getUserProfile() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return null;
+
+    return await _supabase
+        .from('profiles')
+        .select()
+        .eq('id', user.id)
+        .maybeSingle();
+  }
 }

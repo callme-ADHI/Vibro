@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
-import '../../../core/services/auth_service.dart';
+import '../../../features/auth/services/auth_service.dart';
+import '../../../features/auth/controllers/auth_controller.dart';
 import '../../../core/providers/user_provider.dart';
 import '../../../features/auth/screens/login_screen.dart';
 
@@ -48,7 +49,7 @@ class _ConnectedProfilePageState extends ConsumerState<ConnectedProfilePage> {
 
     if (newName != null && newName != currentName) {
       try {
-        await AuthService.instance.updateUsername(newName);
+        await ref.read(authServiceProvider).updateUsername(newName);
         ref.read(userProvider.notifier).updateNameLocally(newName);
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -63,7 +64,7 @@ class _ConnectedProfilePageState extends ConsumerState<ConnectedProfilePage> {
 
   Future<void> _signOut() async {
     ref.read(userProvider.notifier).clearProfile();
-    await AuthService.instance.signOut();
+    await ref.read(authServiceProvider).signOut();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),

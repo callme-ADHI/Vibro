@@ -86,19 +86,35 @@ void onStart(ServiceInstance service) async {
   );
   print('DEBUG BG: Supabase initialized');
 
+  if (Supabase.instance.client.auth.currentUser == null) {
+     print('DEBUG BG: No authenticated user found. Stopping service until login.');
+     service.stopSelf();
+     return;
+  }
+
   final recognition = RecognitionService.instance;
   final nameService = NameService.instance;
   final locationService = LocationService.instance;
 
-  // 2. Fetch only names with COMPLETED training status to monitor
-  final names = await nameService.getTrainedNameLabels();
-  print('DEBUG BG: Active names (trained only): $names');
-
-  // Fetch location mapping
-  Map<String, List<String>> nameToLocMap = await locationService.getNameToLocationMap();
-  List<Map<String, dynamic>> allLocations = await locationService.getLocations();
+  // 2. Fetch data safely
+  Set<String> names = {};
+  Map<String, List<String>> nameToLocMap = {};
+  List<Map<String, dynamic>> allLocations = [];
   bool isAutoLocation = true;
   String? selectedLocationId;
+
+  try {
+    names = await nameService.getTrainedNameLabels();
+    print('DEBUG BG: Active names (trained only): $names');
+
+    // Fetch location mapping
+    nameToLocMap = await locationService.getNameToLocationMap();
+    allLocations = await locationService.getLocations();
+  } catch (e) {
+    print('DEBUG BG: Error fetching initial data: $e');
+    service.stopSelf();
+    return;
+  }
 
   if (names.isEmpty) {
     service.stopSelf();
