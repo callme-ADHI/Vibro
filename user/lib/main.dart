@@ -7,8 +7,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';
-import 'core/services/ble_service.dart';
+import 'core/services/ble_service.dart';           // ESP32 hardware wearable
 import 'core/services/background_service.dart';
+import 'core/services/foreground_service.dart';    // Background keepalive
 import 'presentation/pages/splash_page.dart';
 
 /// Global navigator key for notification tap navigation
@@ -20,10 +21,14 @@ bool notificationAutoOpen = false;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Start ESP32 hardware BLE (wearable device connectivity)
   BleService.instance.initialize();
 
-  // Initialize Background Service
+  // Initialize Background Service (flutter_background_service)
   await BackgroundService.initialize();
+
+  // Start Android foreground service to keep WiFi + speech alive in bg
+  VibroForegroundService.instance.start(mode: 'deaf');
 
   // Initialize Local Notifications with tap handler
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =

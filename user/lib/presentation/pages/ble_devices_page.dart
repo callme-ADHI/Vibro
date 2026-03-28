@@ -1,6 +1,6 @@
-// VIBRO — BLE Devices Page (Deaf User)
-// Scan for nearby Connected phones, select one and pair.
-// Once paired, name-detection alerts arrive via Bluetooth instantly.
+// VIBRO — Devices Page (Deaf User)
+// Scan for nearby Connected phones via WiFi, select one and pair.
+// Once paired, name-detection alerts arrive instantly over local WiFi.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,7 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:vibration/vibration.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../core/services/phone_ble_service.dart';
+import '../../core/services/wifi_service.dart';
 import '../../core/services/ble_service.dart';
 
 class BleDevicesPage extends StatefulWidget {
@@ -20,15 +20,23 @@ class BleDevicesPage extends StatefulWidget {
 
 class _BleDevicesPageState extends State<BleDevicesPage>
     with SingleTickerProviderStateMixin {
-  final DeafPhoneBleClient _client = DeafPhoneBleClient.instance;
+  // Deaf phone is the TCP server — it waits for Connected phone to connect.
+  // We use ConnectedPhoneWifiClient here because Deaf phone scans
+  // (finds the server it should host) — actually: Deaf phone IS the server.
+  // The "scan" on deaf side = start the server and show its address.
+  // The Connected phone is the one that actually browses and connects.
+  //
+  // UI-wise: This page shows pairing status. On deaf phone, we start the
+  // server and display the server address. On connected phone, we scan.
+  // For simplicity: This page (called from Deaf shell) starts DeafPhoneWifiServer.
+  final DeafPhoneWifiServer _server = DeafPhoneWifiServer.instance;
   final BleService _esp32 = BleService.instance;
 
-  PhoneBleStatus _status = PhoneBleStatus.idle;
-  List<DiscoveredVibroDevice> _devices = [];
+  PhoneWifiStatus _status = PhoneWifiStatus.idle;
+  List<DiscoveredWifiDevice> _devices = [];
   String? _connectingId;
 
-  StreamSubscription<PhoneBleStatus>? _statusSub;
-  StreamSubscription<List<DiscoveredVibroDevice>>? _devicesSub;
+  StreamSubscription<PhoneWifiStatus>? _statusSub;
   StreamSubscription<PhoneAlertPayload>? _alertSub;
 
   final FlutterLocalNotificationsPlugin _notifications =
@@ -49,29 +57,30 @@ class _BleDevicesPageState extends State<BleDevicesPage>
 
     _initNotifications();
 
-    _status = _client.status;
-    _statusSub = _client.statusStream.listen((s) {
+    _status = _server.status;
+    _statusSub = _server.statusStream.listen((s) {
       if (!mounted) return;
       setState(() => _status = s);
-      if (s == PhoneBleStatus.scanning) {
+      if (s == PhoneWifiStatus.advertising) {
         _pulseCtrl.repeat(reverse: true);
       } else {
         _pulseCtrl.stop();
         _pulseCtrl.reset();
       }
-      if (s == PhoneBleStatus.paired) {
+      if (s == PhoneWifiStatus.paired) {
         _connectingId = null;
-        _showSnack('Paired! You will now receive alerts via Bluetooth.', success: true);
+        _pulseCtrl.stop();
+        _showSnack('Paired! You will now receive alerts via WiFi.', success: true);
       }
     });
 
-    _devicesSub = _client.discoveredStream.listen((devices) {
-      if (!mounted) return;
-      setState(() => _devices = devices);
-    });
+    // Start WiFi server immediately so Connected phone can find and connect
+    if (_status == PhoneWifiStatus.idle) {
+      _server.startServer();
+    }
 
-    // When already paired, still listen for incoming alerts
-    _alertSub = _client.alertStream.listen(_onAlertReceived);
+    // Listen for incoming alerts from Connected phone
+    _alertSub = _server.alertStream.listen(_onAlertReceived);
   }
 
   Future<void> _initNotifications() async {
@@ -82,7 +91,7 @@ class _BleDevicesPageState extends State<BleDevicesPage>
         ?.requestNotificationsPermission();
   }
 
-  // ── Alert received via BLE ────────────────────────────────────────────────
+  // ── Alert received via WiFi ───────────────────────────────────────────────
   Future<void> _onAlertReceived(PhoneAlertPayload payload) async {
     // Double-pulse vibration
     if (await Vibration.hasVibrator()) {
@@ -98,12 +107,12 @@ class _BleDevicesPageState extends State<BleDevicesPage>
     await _notifications.show(
       99,
       '📣 ${payload.label} called you!',
-      '"${payload.name}" · ${(payload.confidence * 100).toInt()}% confidence · via Bluetooth',
+      '"${payload.name}" · ${(payload.confidence * 100).toInt()}% confidence · via WiFi',
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          'vibro_ble_alerts',
-          'Bluetooth Alerts',
-          channelDescription: 'Real-time alerts from Connected users via BLE',
+          'vibro_wifi_alerts',
+          'WiFi Alerts',
+          channelDescription: 'Real-time alerts from Connected users via local WiFi',
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
@@ -119,7 +128,7 @@ class _BleDevicesPageState extends State<BleDevicesPage>
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 5),
         content: Row(children: [
-          const Icon(Icons.bluetooth_rounded, color: AppColors.white, size: 18),
+          const Icon(Icons.wifi_rounded, color: AppColors.white, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -133,16 +142,17 @@ class _BleDevicesPageState extends State<BleDevicesPage>
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  void _startScan() => _client.startScan();
-  void _stopScan() => _client.stopScan();
+  void _startScan() => _server.startServer();
+  void _stopScan() => _server.stopServer();
 
-  Future<void> _connectTo(DiscoveredVibroDevice device) async {
-    setState(() => _connectingId = device.peripheral.uuid.toString());
-    await _client.connectTo(device);
+  Future<void> _connectTo(DiscoveredWifiDevice device) async {
+    setState(() => _connectingId = device.id);
+    // Deaf phone is the server — nothing to connect to; this would be Connected side.
+    // This page is only shown on Deaf phone, so just show status.
   }
 
   Future<void> _disconnect() async {
-    await _client.disconnect();
+    await _server.stopServer();
     if (mounted) setState(() {});
   }
 
@@ -158,10 +168,9 @@ class _BleDevicesPageState extends State<BleDevicesPage>
   @override
   void dispose() {
     _statusSub?.cancel();
-    _devicesSub?.cancel();
     _alertSub?.cancel();
     _pulseCtrl.dispose();
-    // Don't stop client — keep paired in background
+    // Do NOT stop server — keep it alive for background alerts
     super.dispose();
   }
 
@@ -180,14 +189,14 @@ class _BleDevicesPageState extends State<BleDevicesPage>
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.primaryNavy),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Text('Bluetooth Devices',
+        title: Text('WiFi Pairing',
             style: AppTypography.sectionTitle(color: AppColors.textPrimary).copyWith(fontSize: 17)),
         actions: [
-          if (_status == PhoneBleStatus.paired)
+          if (_status == PhoneWifiStatus.paired)
             TextButton.icon(
               onPressed: _disconnect,
-              icon: const Icon(Icons.bluetooth_disabled_rounded, size: 16, color: AppColors.error),
-              label: Text('Unpair',
+              icon: const Icon(Icons.wifi_off_rounded, size: 16, color: AppColors.error),
+              label: Text('Disconnect',
                   style: AppTypography.bodySmall(color: AppColors.error)
                       .copyWith(fontWeight: FontWeight.w600)),
             ),
@@ -202,7 +211,7 @@ class _BleDevicesPageState extends State<BleDevicesPage>
 
         // ── Main content ───────────────────────────────────────────────────
         Expanded(
-          child: _status == PhoneBleStatus.paired
+          child: _status == PhoneWifiStatus.paired
               ? _buildPairedView()
               : _buildScanView(),
         ),
@@ -220,30 +229,30 @@ class _BleDevicesPageState extends State<BleDevicesPage>
     final IconData icon;
 
     switch (_status) {
-      case PhoneBleStatus.paired:
+      case PhoneWifiStatus.paired:
         color = AppColors.success;
-        label = 'Connected to ${_client.pairedDeviceName}';
-        icon = Icons.bluetooth_connected_rounded;
+        label = 'Connected · receiving alerts via WiFi';
+        icon = Icons.wifi_rounded;
         break;
-      case PhoneBleStatus.scanning:
+      case PhoneWifiStatus.advertising:
         color = AppColors.accentNavy;
-        label = 'Scanning for nearby devices…';
-        icon = Icons.bluetooth_searching_rounded;
+        label = 'Waiting for Connected phone… (${_server.serverAddress})';
+        icon = Icons.wifi_tethering_rounded;
         break;
-      case PhoneBleStatus.connecting:
+      case PhoneWifiStatus.connecting:
         color = AppColors.warning;
-        label = 'Pairing…';
-        icon = Icons.bluetooth_searching_rounded;
+        label = 'Connecting…';
+        icon = Icons.wifi_find_rounded;
         break;
-      case PhoneBleStatus.disconnected:
+      case PhoneWifiStatus.disconnected:
         color = AppColors.error;
         label = 'Disconnected';
-        icon = Icons.bluetooth_disabled_rounded;
+        icon = Icons.wifi_off_rounded;
         break;
       default:
         color = AppColors.textSecondary;
-        label = 'Ready to scan';
-        icon = Icons.bluetooth_rounded;
+        label = 'Tap Start to accept connections';
+        icon = Icons.wifi_rounded;
     }
 
     return Container(
@@ -253,7 +262,8 @@ class _BleDevicesPageState extends State<BleDevicesPage>
         AnimatedBuilder(
           animation: _pulseAnim,
           builder: (_, __) => Transform.scale(
-            scale: _status == PhoneBleStatus.scanning ? _pulseAnim.value : 1.0,
+            scale: (_status == PhoneWifiStatus.advertising || _status == PhoneWifiStatus.scanning)
+                ? _pulseAnim.value : 1.0,
             child: Container(
               width: 42, height: 42,
               decoration: BoxDecoration(
@@ -275,7 +285,7 @@ class _BleDevicesPageState extends State<BleDevicesPage>
           ]),
         ),
         // Signal / paired indicator
-        if (_status == PhoneBleStatus.paired) ...[
+        if (_status == PhoneWifiStatus.paired) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
@@ -324,16 +334,15 @@ class _BleDevicesPageState extends State<BleDevicesPage>
                 decoration: BoxDecoration(
                     color: AppColors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(14)),
-                child: const Icon(Icons.bluetooth_connected_rounded,
+                child: const Icon(Icons.wifi_rounded,
                     color: AppColors.white, size: 26),
               ),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_client.pairedDeviceName,
-                    style: AppTypography.sectionTitle(color: AppColors.white)
-                        .copyWith(fontSize: 16)),
+                const Text('Connected Phone',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 2),
-                Text('Connected · Alerts via Bluetooth',
+                Text('Connected · Alerts via Local WiFi',
                     style: AppTypography.metadata(color: AppColors.white.withValues(alpha: 0.75))),
               ])),
             ]),
@@ -349,9 +358,9 @@ class _BleDevicesPageState extends State<BleDevicesPage>
         Text('How it works', style: AppTypography.sectionTitle(color: AppColors.textPrimary)
             .copyWith(fontSize: 15)),
         const SizedBox(height: 12),
-        _buildStep('1', 'Connected phone starts listening', Icons.mic_rounded),
-        _buildStep('2', 'Name detected by speech recognition', Icons.record_voice_over_rounded),
-        _buildStep('3', 'Alert sent instantly via Bluetooth', Icons.bluetooth_rounded),
+        _buildStep('1', 'Connected phone opens VIBRO & starts listening', Icons.mic_rounded),
+        _buildStep('2', 'Name detected by on-device speech recognition', Icons.record_voice_over_rounded),
+        _buildStep('3', 'Alert sent instantly via local WiFi (no internet)', Icons.wifi_rounded),
         _buildStep('4', 'This phone vibrates & shows notification', Icons.vibration_rounded),
       ]),
     );
@@ -381,11 +390,11 @@ class _BleDevicesPageState extends State<BleDevicesPage>
 
   // ── Scan View ─────────────────────────────────────────────────────────────
   Widget _buildScanView() {
-    if (_status == PhoneBleStatus.idle && _devices.isEmpty) {
+    if (_status == PhoneWifiStatus.idle && _devices.isEmpty) {
       return _buildIdleEmpty();
     }
 
-    if (_status == PhoneBleStatus.scanning && _devices.isEmpty) {
+    if (_status == PhoneWifiStatus.advertising && _devices.isEmpty) {
       return _buildScanning();
     }
 
@@ -401,15 +410,15 @@ class _BleDevicesPageState extends State<BleDevicesPage>
             width: 90, height: 90,
             decoration: BoxDecoration(
                 color: AppColors.badgeBackground, borderRadius: BorderRadius.circular(24)),
-            child: const Icon(Icons.bluetooth_rounded, size: 44, color: AppColors.primaryNavy),
+            child: const Icon(Icons.wifi_tethering_rounded, size: 44, color: AppColors.primaryNavy),
           ),
           const SizedBox(height: 24),
-          Text('Find Connected Devices',
+          Text('Start WiFi Pairing',
               style: AppTypography.sectionTitle(color: AppColors.textPrimary)
                   .copyWith(fontSize: 18)),
           const SizedBox(height: 10),
           Text(
-            'Tap Scan below to find nearby Connected user phones. Make sure their VIBRO app is open.',
+            'Tap Start below to allow Connected phones to find you. Both phones must be on the same WiFi network.',
             style: AppTypography.bodySmall(color: AppColors.textSecondary),
             textAlign: TextAlign.center,
           ),
@@ -436,7 +445,7 @@ class _BleDevicesPageState extends State<BleDevicesPage>
                   width: 74, height: 74,
                   decoration: const BoxDecoration(
                       color: AppColors.primaryNavy, shape: BoxShape.circle),
-                  child: const Icon(Icons.bluetooth_searching_rounded,
+                  child: const Icon(Icons.wifi_tethering_rounded,
                       size: 36, color: AppColors.white),
                 ),
               ),
@@ -444,13 +453,15 @@ class _BleDevicesPageState extends State<BleDevicesPage>
           ),
         ),
         const SizedBox(height: 24),
-        Text('Scanning…', style: AppTypography.sectionTitle(color: AppColors.textPrimary)
+        Text('Waiting for Connection…',
+            style: AppTypography.sectionTitle(color: AppColors.textPrimary)
             .copyWith(fontSize: 18)),
         const SizedBox(height: 8),
-        Text('Looking for nearby VIBRO Connected phones',
-            style: AppTypography.bodySmall(color: AppColors.textSecondary)),
+        Text('Your phone address: ${_server.serverAddress}',
+            style: AppTypography.bodySmall(color: AppColors.primaryNavy)
+                .copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
-        Text('Make sure the Connected user\'s app is open',
+        Text('Connected user can now find and connect to you',
             style: AppTypography.metadata(color: AppColors.textSecondary.withValues(alpha: 0.7))),
       ]),
     );
@@ -482,9 +493,8 @@ class _BleDevicesPageState extends State<BleDevicesPage>
   }
 
   Widget _buildDeviceTile(DiscoveredVibroDevice device) {
-    final id = device.peripheral.uuid.toString();
+    final id = device.id;
     final isConnecting = _connectingId == id;
-    final signalBars = _signalBars(device.rssi);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -512,10 +522,9 @@ class _BleDevicesPageState extends State<BleDevicesPage>
             style: AppTypography.bodyMedium(color: AppColors.textPrimary)
                 .copyWith(fontWeight: FontWeight.w600)),
         subtitle: Row(children: [
-          Icon(Icons.signal_wifi_4_bar_rounded, size: 13,
-              color: signalBars > 2 ? AppColors.success : AppColors.warning),
+          const Icon(Icons.wifi_rounded, size: 13, color: AppColors.success),
           const SizedBox(width: 4),
-          Text('${device.rssi} dBm · VIBRO-CONNECT',
+          Text('${device.host} · VIBRO-WIFI',
               style: AppTypography.metadata(color: AppColors.textSecondary)),
         ]),
         trailing: isConnecting
@@ -542,9 +551,9 @@ class _BleDevicesPageState extends State<BleDevicesPage>
 
   // ── Bottom bar ────────────────────────────────────────────────────────────
   Widget _buildBottomBar() {
-    if (_status == PhoneBleStatus.paired) return const SizedBox.shrink();
+    if (_status == PhoneWifiStatus.paired) return const SizedBox.shrink();
 
-    final isScanning = _status == PhoneBleStatus.scanning;
+    final isActive = _status == PhoneWifiStatus.advertising;
 
     return SafeArea(
       child: Padding(
@@ -553,17 +562,17 @@ class _BleDevicesPageState extends State<BleDevicesPage>
           width: double.infinity,
           height: 52,
           child: ElevatedButton.icon(
-            onPressed: isScanning ? _stopScan : _startScan,
+            onPressed: isActive ? _stopScan : _startScan,
             style: ElevatedButton.styleFrom(
-              backgroundColor: isScanning ? AppColors.error : AppColors.primaryNavy,
+              backgroundColor: isActive ? AppColors.error : AppColors.primaryNavy,
               foregroundColor: AppColors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               elevation: 0,
             ),
-            icon: Icon(isScanning
+            icon: Icon(isActive
                 ? Icons.stop_rounded
-                : Icons.bluetooth_searching_rounded, size: 20),
-            label: Text(isScanning ? 'Stop Scanning' : 'Scan for Devices',
+                : Icons.wifi_tethering_rounded, size: 20),
+            label: Text(isActive ? 'Stop Sharing' : 'Start WiFi Pairing',
                 style: AppTypography.bodyMedium(color: AppColors.white)
                     .copyWith(fontWeight: FontWeight.w600)),
           ),

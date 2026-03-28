@@ -5,7 +5,6 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   audioplayers_windows
-  bluetooth_low_energy_windows
   geolocator_windows
   permission_handler_windows
   record_windows

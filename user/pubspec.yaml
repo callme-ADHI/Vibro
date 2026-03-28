@@ -25,9 +25,11 @@ dependencies:
   # Backend & Authentication
   supabase_flutter: ^2.6.0
   
-  # BLE Communication
+  # BLE Communication (ESP32 hardware wearable only)
   flutter_blue_plus: ^1.34.5             # ESP32 hardware connection (Central)
-  bluetooth_low_energy: ^6.0.3           # Phone-to-phone BLE (Central + Peripheral)
+
+  # WiFi Local P2P (Phone-to-phone — replaces BLE)
+  network_info_plus: ^6.0.1              # Get local IP address for display
   
   # Audio Recording & Processing
   record: ^6.1.0
